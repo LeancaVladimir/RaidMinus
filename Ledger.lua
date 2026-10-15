@@ -1,6 +1,7 @@
 -- Журнал минусов и плюсов текущего рейда: поставить, снять (с причиной), вернуть, отменить
 -- последний клик; итог игрока и допуск к роллу.
 -- Запись хранит текст и очки правила целиком, поэтому правка свода не меняет журнал.
+-- Настройки правила (Rules.lua) работают здесь: повтор, нарастание, роли, шёпот игроку, объявление.
 
 local _, ns = ...
 
@@ -13,55 +14,104 @@ local function NeedSession()
 	return s
 end
 
--- names — список имён; rule — правило свода или {boss, text, value, kick};
--- auto — {detail = «что увидела автоматика», boss, pull}: запись от автоматики, не попадает в «Отменить последнее»
+-- сколько раз правило уже стоит игроку; scope "fight" — только в этом бою (босс и пул)
+local function Count(s, name, ruleId, boss, pull, scope)
+	if not ruleId then return 0 end
+	local n = 0
+	for _, ev in ipairs(s.events) do
+		if ev.player == name and ev.rule == ruleId and ev.status ~= "cancelled"
+			and (scope ~= "fight" or (ev.boss == boss and ev.pull == pull)) then
+			n = n + 1
+		end
+	end
+	return n
+end
+
+-- почему правило нельзя поставить игроку (nil — можно)
+function ns.RuleBlock(rule, name, boss, pull)
+	local s = ns.Session()
+	if not s then return "рейд не начат" end
+	if not ns.RuleRoleOk(rule, name) then return "не та роль" end
+	if rule.rep == "raid" and Count(s, name, rule.id, boss, pull) > 0 then return "уже стоит за этот рейд" end
+	if rule.rep == "fight" and Count(s, name, rule.id, boss, pull, "fight") > 0 then return "уже стоит за этот бой" end
+end
+
+-- names — список имён; rule — правило свода, его копия (находка) или {boss, text, value, kick};
+-- auto — {detail = «что увидела автоматика», boss, pull}: запись от автоматики, не попадает в «Отменить последнее».
+-- Возвращает новые записи.
 function ns.AddEvents(names, rule, auto)
 	local s = NeedSession()
-	if not s or #names == 0 then return end
-	local group = {}
+	local made = {}
+	if not s or #names == 0 then return made end
+	local group, skipped = {}, {}
 	local me = ns.PlayerName()
 	for _, name in ipairs(names) do
-		s.nextId = s.nextId + 1
 		local p = s.roster[name]
 		local boss = (auto and auto.boss) or (ns.IsBoss(rule.boss) and rule.boss) or s.boss
-		local ev = {
-			id = s.nextId,
-			t = time(),
-			player = name,
-			class = p and p.class,
-			text = ns.RuleText(rule),
-			value = rule.value or 0,
-			kick = rule.kick or nil,
-			rule = rule.id,
-			sec = rule.boss,
-			boss = boss,
-			pull = (auto and auto.pull) or (boss and s.pulls[boss]),
-			by = auto and "авто" or me,
-			auto = auto and true or nil,
-			detail = auto and auto.detail,
-		}
-		tinsert(s.events, ev)
-		tinsert(group, ev.id)
-		ns.QueueAnnounce(ev)
+		local pull = (auto and auto.pull) or (boss and s.pulls[boss])
+		local block = ns.RuleBlock(rule, name, boss, pull)
+		if block then
+			tinsert(skipped, name .. " — " .. block)
+		else
+			local value = rule.value or 0
+			if rule.step then value = value + rule.step * Count(s, name, rule.id, boss, pull) end
+			s.nextId = s.nextId + 1
+			local ev = {
+				id = s.nextId,
+				t = time(),
+				player = name,
+				class = p and p.class,
+				text = ns.RuleText(rule),
+				chat = rule.chat or (rule.id and ns.ChatText(rule)) or nil,
+				value = value,
+				kick = rule.kick or nil,
+				rule = rule.id,
+				sec = rule.boss,
+				boss = boss,
+				pull = pull,
+				by = auto and "авто" or me,
+				auto = auto and true or nil,
+				detail = auto and auto.detail,
+				ann = rule.ann,
+			}
+			tinsert(s.events, ev)
+			tinsert(group, ev.id)
+			tinsert(made, ev)
+			ns.QueueAnnounce(ev)
+			if rule.whisper then ns.WhisperEvent(ev) end
+		end
 	end
-	if not auto then s.lastGroup = group end
+	if #skipped > 0 then ns.Print("не поставлено: " .. tconcat(skipped, "; ") .. ".") end
+	if not auto and #group > 0 then
+		s.lastGroup = group
+		if ns.OnEventsAdded then ns.OnEventsAdded(made) end
+	end
 	ns.Refresh()
+	return made
 end
 
 -------------------------------------------------------------------------------
 -- находки автоматики: ждут РЛа во вкладке «На проверку»;
 -- у правила с «ставить сразу» (rule.instant) — сразу минус игроку
 
+-- копия правила на момент находки (текст уже с числами РЛа)
 local function CopyRule(rule)
-	return {id = rule.id, boss = rule.boss, text = ns.RuleText(rule), value = rule.value, kick = rule.kick, det = rule.auto} -- текст уже с числами РЛа
+	return {
+		id = rule.id, boss = rule.boss, text = ns.RuleText(rule), chat = ns.ChatText(rule),
+		value = rule.value, kick = rule.kick, det = rule.auto,
+		rep = rule.rep, step = rule.step, ann = rule.ann, whisper = rule.whisper,
+	}
 end
 
 -- player — кто, rule — правило свода, detail — что увидела автоматика
 function ns.AddFinding(player, rule, detail)
 	local s = ns.Session()
 	if not s then return end
+	if not ns.RuleDiffOk(rule) or not ns.RuleRoleOk(rule, player) then return end
 	local boss = ns.IsBoss(rule.boss) and rule.boss or s.boss
-	local f = {player = player, rule = CopyRule(rule), detail = detail, boss = boss, pull = boss and s.pulls[boss], t = time()}
+	local pull = boss and s.pulls[boss]
+	if ns.RuleBlock(rule, player, boss, pull) then return end
+	local f = {player = player, rule = CopyRule(rule), detail = detail, boss = boss, pull = pull, t = time()}
 	if rule.instant then
 		ns.AddEvents({player}, f.rule, f)
 		return
@@ -83,7 +133,7 @@ local function DropFinding(f)
 	local s = ns.Session()
 	if not s or not s.queue then return end
 	for i, x in ipairs(s.queue) do
-		if x == f then table.remove(s.queue, i) break end
+		if x == f then tremove(s.queue, i) break end
 	end
 end
 
@@ -157,6 +207,18 @@ function ns.RestoreEvent(ev)
 	ns.Refresh()
 end
 
+-- последний клик: записи, которые ещё можно отменить
+function ns.LastGroup()
+	local s = ns.Session()
+	local out = {}
+	if not s or not s.lastGroup then return out end
+	for _, id in ipairs(s.lastGroup) do
+		local ev = ns.EventById(id)
+		if ev and ev.status ~= "cancelled" then tinsert(out, ev) end
+	end
+	return out
+end
+
 -- отмена последнего клика: ещё не объявленное удаляется молча, объявленное снимается с объявлением
 function ns.UndoLast()
 	local s = ns.Session()
@@ -165,16 +227,13 @@ function ns.UndoLast()
 		return
 	end
 	local n = 0
-	for _, id in ipairs(s.lastGroup) do
-		local ev = ns.EventById(id)
-		if ev and ev.status ~= "cancelled" then
-			if ev.announced then
-				ns.CancelEvent(ev, "ошибка")
-			else
-				RemoveEvent(ev)
-			end
-			n = n + 1
+	for _, ev in ipairs(ns.LastGroup()) do
+		if ev.announced then
+			ns.CancelEvent(ev, "ошибка")
+		else
+			RemoveEvent(ev)
 		end
+		n = n + 1
 	end
 	s.lastGroup = nil
 	ns.Print(format("отменено записей: %d.", n))
@@ -231,10 +290,13 @@ function ns.EffectText(ev)
 	return #parts > 0 and tconcat(parts, ", ") or "0"
 end
 
+-- текст записи для чата
+function ns.EventChat(ev) return ev.chat or ns.ShortText(ev.text) end
+
 -- «Вася -30 (Дух)»; withName = false — «Дух -30»
 function ns.EventShort(ev, withName)
-	if withName == false then return ns.ShortText(ev.text) .. " " .. ns.EffectText(ev) end
-	return format("%s %s (%s)", ev.player, ns.EffectText(ev), ns.ShortText(ev.text))
+	if withName == false then return ns.EventChat(ev) .. " " .. ns.EffectText(ev) end
+	return format("%s %s (%s)", ev.player, ns.EffectText(ev), ns.EventChat(ev))
 end
 
 -- «-40» или «-40, кик»

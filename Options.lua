@@ -1,5 +1,5 @@
--- Окно настроек (AceConfig): общие настройки, своды правил (новый, копия, обмен строкой)
--- и редактор правил по разделам. Таблица правил пересобирается после каждой правки.
+-- Окно настроек (AceConfig): общие настройки (объявления, розыгрыш, добыча, клавиши, обновления)
+-- и своды правил (название, обмен строкой). Сами правила правятся во вкладке «Правила» главного окна.
 
 local _, ns = ...
 
@@ -9,14 +9,10 @@ local ipairs, tostring, tonumber = ipairs, tostring, tonumber
 local APP = "RaidMinus"
 local ACD, ACR
 local importText = ""
-local options
 
 local function RS() return ns.ActiveRuleset() end
 
-local BuildRules
-
 local function Changed()
-	BuildRules()
 	ns.Refresh()
 	if ACR then ACR:NotifyChange(APP) end
 end
@@ -29,140 +25,25 @@ local function SettingSet(info, v)
 	ns.Refresh()
 end
 
--------------------------------------------------------------------------------
--- редактор правил
-
--- метка вида правила: красная — автоматика, оранжевая — видно, кто нарушил, белая — вручную
-local function KindTag(rule)
-	local kind = ns.RuleKind(rule)
-	return "|c" .. ns.KIND_HEX[kind] .. "[" .. ns.KIND_NAMES[kind] .. "]|r"
-end
-
-local function Toggle(name, order, desc, get, set)
-	return {type = "toggle", name = name, order = order, desc = desc, get = get, set = function(_, v) set(v) Changed() end}
-end
-
-local function RuleArgs(rule)
-	local d = ns.Detector(rule.auto)
-	local args = {
-		enabled = Toggle("Включено", 1, "Выключенное правило серое в окне /rm; автоправило перестаёт ловить.",
-			function() return not rule.off end, function(v) rule.off = (not v) or nil end),
-		value = {
-			type = "input", name = "Очки", order = 3, width = "half",
-			get = function() return tostring(rule.value) end,
-			validate = function(_, v)
-				if not tonumber(v) then return "Нужно число: -20, 10 или 0" end
-				return true
-			end,
-			set = function(_, v)
-				rule.value = tonumber(v)
-				Changed()
-			end,
-		},
-		kick = Toggle("Кик", 4, "Пометка «на кик»: пока запись не снята, игрок не побеждает в ролле.",
-			function() return rule.kick end, function(v) rule.kick = v or nil end),
-		up = {
-			type = "execute", name = "Выше", order = 10, width = "half",
-			func = function()
-				ns.MoveRule(RS(), rule, -1)
-				Changed()
-			end,
-		},
-		down = {
-			type = "execute", name = "Ниже", order = 11, width = "half",
-			func = function()
-				ns.MoveRule(RS(), rule, 1)
-				Changed()
-			end,
-		},
+-- клавиша из «Назначения клавиш»
+local function Binding(action, name, order, desc)
+	return {
+		type = "keybinding", name = name, order = order, desc = desc,
+		get = function() return GetBindingKey(action) end,
+		set = function(_, key)
+			if InCombatLockdown() then
+				ns.Print("клавиши меняются только вне боя.")
+				return
+			end
+			local old = GetBindingKey(action)
+			if old then SetBinding(old) end
+			if key and key ~= "" then SetBinding(key, action) end
+			SaveBindings(GetCurrentBindingSet())
+		end,
 	}
-	if d then
-		args.instant = Toggle("Ставить сразу", 2, "Находку сразу ставить игроку минусом, без вкладки «На проверку». Снять можно в журнале.",
-			function() return rule.instant end, function(v) rule.instant = v or nil end)
-		args.how = {type = "description", order = 0, name = "|cff9d9d9dКак ловится: " .. d.how .. "|r"}
-		for i, p in ipairs(d.params or {}) do
-			local pkey = p.key
-			args["p_" .. pkey] = {
-				type = "input", name = p.name, order = 5 + i * 0.1, width = "half",
-				get = function() return tostring(ns.RuleParam(rule, pkey)) end,
-				validate = function(_, v)
-					local n = tonumber(v)
-					if not n or n < 0 then return "Нужно число, например " .. p.default end
-					return true
-				end,
-				set = function(_, v)
-					rule.params = rule.params or {}
-					rule.params[pkey] = tonumber(v)
-					Changed()
-				end,
-			}
-		end
-	else
-		args.text = {
-			type = "input", name = "Текст", order = 0.5, width = "double",
-			get = function() return rule.text end,
-			set = function(_, v)
-				v = strtrim(v)
-				if v ~= "" then rule.text = v end
-				Changed()
-			end,
-		}
-		args.who = Toggle("Видно, кто нарушил", 2, "Оранжевая метка: нарушителя видно (журнал боя, Skada). Без неё — белая: кто виноват, решает РЛ.",
-			function() return rule.who end, function(v) rule.who = v or nil end)
-		args.del = {
-			type = "execute", name = "Удалить", order = 12, width = "half",
-			confirm = true, confirmText = "Удалить правило «" .. rule.text .. "»?",
-			func = function()
-				ns.RemoveRule(RS(), rule)
-				Changed()
-			end,
-		}
-	end
-	return args
 end
 
-function BuildRules()
-	local rs = RS()
-	local args = {
-		desc = {
-			type = "description", order = 0,
-			name = "Свод «" .. rs.name .. "». Сменить свод, создать новый или поделиться строкой — вкладка «Своды правил».\n\n"
-				.. "Слева разделы: боссы, «Общее» (на любом боссе) и «Плюсы». Правка сразу видна в окне /rm; "
-				.. "уже поставленные минусы не меняются.\n\n"
-				.. "|c" .. ns.KIND_HEX.auto .. "[автоматика]|r — встроенное правило, ловит аддон (по умолчанию -10, на проверку).\n"
-				.. "|c" .. ns.KIND_HEX.known .. "[видно, кто нарушил]|r — нарушителя видно, ставите вы.\n"
-				.. "|c" .. ns.KIND_HEX.manual .. "[вручную]|r — кто виноват, решаете вы (например, баф по просьбе).",
-		},
-	}
-	for i, sec in ipairs(ns.SECTIONS) do
-		local key = sec.key
-		local list = ns.RulesFor(rs, key)
-		local group = {
-			type = "group", order = i, args = {},
-			name = format("%s |cff9d9d9d(%d)|r", sec.name, #list),
-		}
-		for j, rule in ipairs(list) do
-			local title = KindTag(rule) .. "  " .. ns.ValueColor(rule.value) .. "  " .. ns.RuleText(rule)
-			if rule.off then title = title .. "  |cff707070(выключено)|r" end
-			if rule.instant then title = title .. "  |cffffd100(сразу)|r" end
-			group.args[rule.id] = {type = "group", inline = true, order = j, name = title, args = RuleArgs(rule)}
-		end
-		group.args.add = {
-			type = "execute", name = "Добавить правило", order = 1000,
-			func = function()
-				ns.AddRule(RS(), key)
-				Changed()
-			end,
-		}
-		args[key] = group
-	end
-	options.args.rules.args = args
-end
-
--------------------------------------------------------------------------------
--- таблица настроек
-
-options = {
+local options = {
 	type = "group",
 	name = "RaidMinus",
 	childGroups = "tab",
@@ -174,6 +55,7 @@ options = {
 				hdrChat = {type = "header", name = "Объявления и шёпот", order = 1},
 				announce = {
 					type = "select", name = "Объявлять минусы в рейд", order = 2, width = "double",
+					desc = "У каждого правила можно выбрать своё (вкладка «Правила» → «Объявление»).",
 					values = {instant = "сразу после клика", combat = "после боя (в бою копятся)", off = "не объявлять"},
 				},
 				whisper = {type = "toggle", name = "Отвечать на !минус в шёпот", order = 3, width = "full"},
@@ -196,26 +78,50 @@ options = {
 				rollLines = {type = "range", name = "Строк итога в рейд", order = 13.5, min = 3, max = 25, step = 1,
 					desc = "Итог ролла пишется в рейд построчно: каждый игрок отдельным сообщением, победитель со звездой. Не засчитанные — ещё до 5 строк."},
 				rollCountdown = {type = "toggle", name = "Напоминать «осталось 10 сек»", order = 14, width = "full"},
-				collectLoot = {type = "toggle", name = "Собирать в список добычу, которую лутаю я", order = 15, width = "full"},
-				dropPanel = {type = "toggle", name = "Показывать окошко «Добыча», когда открываю тело или ответственный скидывает список", order = 15.1, width = "full"},
-				autoDropLoot = {type = "toggle", name = "Добавлять такую добычу в список сразу, без кнопки «+»", order = 15.2, width = "full"},
 				watchOthers = {
-					type = "toggle", name = "Чужой ролл: предмет в список, броски считаю с минусами", order = 15.3, width = "full",
+					type = "toggle", name = "Чужой ролл: предмет в список, броски считаю с минусами", order = 15, width = "full",
 					desc = "Лидер, ассистент или ответственный за добычу пишет в рейд «ролл [предмет]» — предмет попадает в список, а аддон молча считает броски с минусами. В чат — только по кнопке «Закончить розыгрыш» или «Итог в чат».",
 				},
-				lootQuality = {
-					type = "select", name = "Какую добычу собирать", order = 16,
-					values = {[2] = "необычную и выше", [3] = "редкую и выше", [4] = "эпическую и выше"},
-				},
 
-				hdrOther = {type = "header", name = "Прочее", order = 20},
+				hdrLoot = {type = "header", name = "Добыча", order = 20},
+				lootDesc = {type = "description", order = 20.1, fontSize = "medium",
+					name = "Аддон сам узнаёт, что упало с босса, даже если тело открывали не вы, и записывает важное в розыгрыш. Окно «Добыча» (/rm добыча) листает боссов ◀ ▶ и показывает, что не включено."},
+				lootFilter = {
+					type = "select", name = "Что разыгрывать", order = 21, width = "double",
+					values = {heroic = "гер. снаряжение ЦЛК 25, жетоны, маунт (осколки, саронит — нет)", epic = "все эпики (кроме мусора)"},
+				},
+				lootMinIlvl = {
+					type = "range", name = "Предметы не из ЦЛК 25 гер.: уровень от", order = 22, min = 200, max = 290, step = 1,
+					disabled = function() return ns.DB.settings.lootFilter ~= "heroic" end,
+					desc = "Для «гер. снаряжения»: предмет, которого нет в таблице добычи ЦЛК 25 гер., проходит, если он эпический, надевается и его уровень не ниже этого.",
+				},
+				lootAuto = {type = "toggle", name = "Прошедшее фильтр сразу добавлять в розыгрыш", order = 23, width = "full"},
+				lootPopup = {
+					type = "select", name = "Окно «Добыча» открывать само", order = 24, width = "double",
+					values = {new = "при новой добыче", missing = "только если что-то не в розыгрыше", off = "не открывать"},
+				},
+				srcCorpse = {type = "toggle", name = "Источник: тело, которое открыл я", order = 25, width = "full"},
+				srcRaidRoll = {type = "toggle", name = "Источник: тело открыл другой с аддоном RaidRoll", order = 26, width = "full",
+					desc = "RaidRoll рассылает добычу тела всему рейду по скрытому каналу — так видно добычу, даже если тело открыли не вы."},
+				srcChat = {type = "toggle", name = "Источник: строки «Вася получает добычу: [предмет]»", order = 27, width = "full"},
+				srcList = {type = "toggle", name = "Источник: список ссылок от лидера, ассистента или ответственного", order = 28, width = "full"},
+
+				hdrQuick = {type = "header", name = "Быстрые минусы и клавиши", order = 30},
+				keyTarget = Binding("RAIDMINUS_TARGET", "Минус цели (меню 1–9)", 31,
+					"Возьмите игрока рейда в цель и нажмите: у курсора меню правил текущего босса и быстрых «Общих», цифра — поставить."),
+				keyCompact = Binding("RAIDMINUS_COMPACT", "Мини-панель", 32),
+				keyToggle = Binding("RAIDMINUS_TOGGLE", "Окно RaidMinus", 33),
+				keyLoot = Binding("RAIDMINUS_LOOT", "Окно «Добыча»", 34),
+				compactAuto = {type = "toggle", name = "Мини-панель сама появляется на пуле босса, если окно закрыто", order = 35, width = "full"},
+
+				hdrOther = {type = "header", name = "Прочее", order = 40},
 				reloadPrompt = {
-					type = "toggle", name = "После убийства босса предлагать /reload", order = 21, width = "full",
+					type = "toggle", name = "После убийства босса предлагать /reload", order = 41, width = "full",
 					desc = "WoW записывает данные аддонов на диск только при /reload и выходе: при вылете игры минусы рейда пропадут. "
 						.. "Если стоит SkadaDiscord, он делает /reload сам, и окно не появится.",
 				},
 				minimap = {
-					type = "toggle", name = "Кнопка у миникарты", order = 22, width = "full",
+					type = "toggle", name = "Кнопка у миникарты", order = 42, width = "full",
 					get = function() return not ns.DB.minimap.hide end,
 					set = function(_, v)
 						ns.DB.minimap.hide = not v
@@ -224,11 +130,21 @@ options = {
 						end
 					end,
 				},
+				versionCheck = {
+					type = "toggle", name = "Узнавать о новой версии от других игроков с RaidMinus", order = 43, width = "full",
+					desc = "Аддон сам не скачивает обновления. Он сообщает о новой версии, если она есть у кого-то в рейде или гильдии. Скачать: " .. ns.RELEASES,
+				},
+				version = {type = "description", order = 44, name = function()
+					return format("|cff9d9d9dВерсия %s%s. Новые версии: %s|r", ns.VERSION,
+						ns.newest and (", есть новее: |cffffd100" .. ns.newest .. "|r|cff9d9d9d") or "", ns.RELEASES)
+				end},
 			},
 		},
 		sets = {
 			type = "group", name = "Своды правил", order = 2,
 			args = {
+				desc = {type = "description", order = 0, fontSize = "medium",
+					name = "Правила свода правятся во вкладке «Правила» главного окна (/rm правила). Здесь — название и обмен строкой."},
 				active = {
 					type = "select", name = "Свод для рейда", order = 1, width = "double",
 					values = function()
@@ -248,33 +164,6 @@ options = {
 					set = function(_, v)
 						v = strtrim(v)
 						if v ~= "" then ns.RenameRuleset(RS(), v) end
-						Changed()
-					end,
-				},
-				hdrNew = {type = "header", name = "Новый свод", order = 10},
-				create = {
-					type = "execute", name = "Новый пустой свод", order = 12,
-					desc = "Только встроенные автоправила — свои правила добавьте во вкладке «Правила».",
-					func = function()
-						local rs = ns.EmptyRuleset("Новый свод")
-						ns.SetActiveRuleset(rs.id)
-						Changed()
-					end,
-				},
-				copy = {
-					type = "execute", name = "Копия текущего", order = 13,
-					func = function()
-						local rs = ns.CopyRuleset(RS())
-						ns.SetActiveRuleset(rs.id)
-						Changed()
-					end,
-				},
-				delete = {
-					type = "execute", name = "Удалить текущий", order = 14,
-					confirm = true, confirmText = "Удалить текущий свод правил?",
-					disabled = function() return #ns.DB.rulesets < 2 end,
-					func = function()
-						ns.DeleteRuleset(RS())
 						Changed()
 					end,
 				},
@@ -304,25 +193,20 @@ options = {
 				},
 			},
 		},
-		rules = {
-			type = "group", name = "Правила", order = 3, childGroups = "tree",
-			args = {},
-		},
 	},
 }
 
 function ns.OpenOptions(tab)
+	if tab == "rules" then
+		ns.ShowTab("rules")
+		return
+	end
 	if not ACD then
 		ns.Print("окно настроек недоступно (нет AceConfig).")
 		return
 	end
-	BuildRules()
 	ACD:Open(APP)
-	if tab == "rules" then
-		ACD:SelectGroup(APP, "rules", ns.ui.viewBoss or ns.CurrentBoss() or ns.SECTIONS[1].key)
-	elseif tab then
-		ACD:SelectGroup(APP, tab)
-	end
+	if tab then ACD:SelectGroup(APP, tab) end
 end
 
 ns.OnLoad(function()
@@ -330,7 +214,6 @@ ns.OnLoad(function()
 	ACD = LibStub("AceConfigDialog-3.0", true)
 	ACR = LibStub("AceConfigRegistry-3.0", true)
 	if not AceConfig or not ACD then return end
-	BuildRules()
 	AceConfig:RegisterOptionsTable(APP, options)
-	ACD:SetDefaultSize(APP, 860, 640)
+	ACD:SetDefaultSize(APP, 760, 620)
 end)

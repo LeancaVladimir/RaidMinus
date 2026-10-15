@@ -1,7 +1,7 @@
 -- Тестовый рейд (/rm тест): прогнать всё до настоящего рейда, ничего не отправляя в чат.
 --   «Тест: босс» — пул и убийство следующего босса ЦЛК; автоправила этого босса «ловят» игроков
 --     (во вкладку «На проверку» или сразу минусом — как настроено у правила), шёпот !минус
---     от пойманного, окошко «Добыча» с настоящей добычей 25 гер.
+--     от пойманного, добыча как будто тело открыл ответственный с RaidRoll (фильтр, окно «Добыча»).
 --   «Тест: чужой ролл» — ответственный за добычу (Холпал) объявляет ролл, выдуманные игроки бросают.
 -- Всё, что ушло бы в чат, печатается у вас с пометкой (тест) [Рейд] / [Объявление рейду] / [Шёпот].
 
@@ -11,6 +11,7 @@ local format, tinsert, tremove = string.format, table.insert, table.remove
 local ipairs, random = ipairs, math.random
 
 local LOOT_MASTER = "Холпал"
+local SARONITE = 49908
 
 -- эпики ЦЛК 25 гер. по боссам (из AtlasLoot)
 local TEST_LOOT = {
@@ -107,8 +108,7 @@ function ns.TestBoss()
 	local rs = ns.ActiveRuleset()
 	local victims, instant = {}, 0
 	for _, d in ipairs(ns.DETECTORS) do
-		local mine = d.boss == key or (d.key == "pp_bonus" and key == "putricide")
-		if mine or (d.boss == "general" and random() < 0.5) then
+		if d.boss == key or (d.boss == "general" and random() < 0.5) then
 			local rule = ns.AutoRule(rs, d.key)
 			if rule and not rule.off then
 				for _, name in ipairs(Pick(Candidates(d.key), d.key == "sf_dps" and 3 or 1)) do
@@ -134,15 +134,23 @@ function ns.TestBoss()
 		end)
 	end
 
-	-- добыча с тела
-	local links = {}
-	for _, id in ipairs(Pick(TEST_LOOT[key] or {}, random(3, 4))) do
-		local link = ItemLink(id)
-		tinsert(links, {link = link, texture = select(10, GetItemInfo(id))})
+	-- добыча: тело открыл Холпал с аддоном RaidRoll (рассылка по каналу RRL), саронит фильтр скроет;
+	-- через 3 сек Холпал забирает два предмета себе — строки чата лута не должны их задвоить
+	local ids = Pick(TEST_LOOT[key] or {}, random(3, 4))
+	tinsert(ids, SARONITE)
+	for _, id in ipairs(ids) do
+		local name = GetItemInfo(id) or ("Предмет " .. id)
+		ns.OnRaidRollMessage(format("Beta_2\a%s\a%s\a%d\a%s\a277", LOOT_MASTER, sec.name, id, name), "RAID", LOOT_MASTER)
 	end
-	ns.ShowDrop("test:" .. key .. ":" .. time(), sec.name .. " (тест)", links)
+	ns.After(3, function()
+		local now = ns.Session()
+		if not now or not now.test then return end
+		for i = 1, 2 do
+			if ids[i] then ns.OnLootMessage(format(LOOT_ITEM, LOOT_MASTER, ItemLink(ids[i]))) end
+		end
+	end)
 
-	ns.Print(format("тест: %s убит. Автоматика: находок %d (сразу минусом %d, на проверку %d). Добыча — в окошке справа.",
+	ns.Print(format("тест: %s убит. Автоматика: находок %d (сразу минусом %d, на проверку %d). Добыча — в окне «Добыча» (тело открыл Холпал с RaidRoll).",
 		sec.name, #victims, instant, #victims - instant))
 	if key == "saurfang" then
 		ns.Print("тест: Холпал — хил, переодетый в ДД: планка ДПС его не касается.")

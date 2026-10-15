@@ -1,11 +1,12 @@
 -- Объявления в рейд и шёпот-команды.
 -- Новые минусы копятся и уходят одним сообщением: сразу после серии кликов или после боя
--- (настройка announce). Игроку аддон не нужен: !минус в шёпот — его сумма и список.
+-- (настройка announce; у правила может быть свой режим — ev.ann). Игроку аддон не нужен:
+-- !минус в шёпот — его сумма и список; у правила с «шепнуть игроку» он сразу получает причину.
 
 local _, ns = ...
 
-local format, tinsert, tconcat = string.format, table.insert, table.concat
-local ipairs, pairs = ipairs, pairs
+local format, tinsert, tremove = string.format, table.insert, table.remove
+local ipairs = ipairs
 
 local MINUS_CMDS = {["!минус"] = true, ["!минусы"] = true, ["!minus"] = true, ["!rm"] = true}
 local REPLY_PREFIX = "[RaidMinus] "
@@ -17,6 +18,9 @@ local flushTimer
 
 local function Settings() return ns.DB.settings end
 
+-- режим объявления записи: свой у правила или общий
+local function Mode(ev) return ev.ann or Settings().announce end
+
 local function ScheduleFlush(delay)
 	ns.Cancel(flushTimer)
 	flushTimer = ns.After(delay, function()
@@ -26,7 +30,7 @@ local function ScheduleFlush(delay)
 end
 
 function ns.QueueAnnounce(ev)
-	local mode = Settings().announce
+	local mode = Mode(ev)
 	local s = ns.Session()
 	if mode == "off" or not s then return end
 	s.pending = s.pending or {}
@@ -42,31 +46,35 @@ function ns.DropFromAnnounce(ev)
 	local s = ns.Session()
 	if not s or not s.pending then return end
 	for i, id in ipairs(s.pending) do
-		if id == ev.id then table.remove(s.pending, i) return end
+		if id == ev.id then tremove(s.pending, i) return end
 	end
 end
 
--- force — отправить сейчас, даже в бою (завершение рейда)
+-- force — отправить всё сейчас, даже в бою (завершение рейда). В бою уходят только записи «сразу».
 function ns.FlushAnnounce(force)
 	local s = ns.Session()
 	if not s or not s.pending or #s.pending == 0 then return end
-	if not force and Settings().announce == "combat" and InCombatLockdown() then return end
+	local combat = InCombatLockdown() and not force
 
 	-- группируем по боссу в порядке появления
-	local order, byBoss = {}, {}
+	local order, byBoss, keep = {}, {}, {}
 	for _, id in ipairs(s.pending) do
 		local ev = ns.EventById(id)
 		if ev and ev.status ~= "cancelled" then
-			local key = ev.boss or "general"
-			if not byBoss[key] then
-				byBoss[key] = {}
-				tinsert(order, key)
+			if combat and Mode(ev) == "combat" then
+				tinsert(keep, id)
+			else
+				local key = ev.boss or "general"
+				if not byBoss[key] then
+					byBoss[key] = {}
+					tinsert(order, key)
+				end
+				tinsert(byBoss[key], ev)
+				ev.announced = true
 			end
-			tinsert(byBoss[key], ev)
-			ev.announced = true
 		end
 	end
-	s.pending = nil
+	s.pending = #keep > 0 and keep or nil
 	for _, key in ipairs(order) do
 		local parts = {}
 		for _, ev in ipairs(byBoss[key]) do tinsert(parts, ns.EventShort(ev)) end
@@ -80,10 +88,18 @@ function ns.AnnounceCancel(ev)
 		ns.DropFromAnnounce(ev)
 		return
 	end
-	if Settings().announce == "off" then return end
+	if Mode(ev) == "off" then return end
 	local msg = "Снято: " .. ns.EventShort(ev)
 	if ev.reason then msg = msg .. " — " .. ev.reason end
 	ns.Announce(msg)
+end
+
+-- игроку шёпотом: за что и сколько у него теперь
+function ns.WhisperEvent(ev)
+	local where = ev.boss and (" (" .. ns.ShortName(ev.boss) .. ")") or ""
+	local msg = format("%sВам %s: %s%s. Итого: %s.", REPLY_PREFIX, ns.EffectText(ev), ns.EventChat(ev), where,
+		ns.StateText(ev.player, false))
+	ns.QueueWhisper(ev.player, msg)
 end
 
 ns.On("PLAYER_REGEN_ENABLED", function()
@@ -103,7 +119,6 @@ local function Reply(target, lines)
 end
 
 local function MinusReply(sender, arg)
-	local s = ns.Session()
 	local name = sender
 	if arg ~= "" then
 		local found = ns.MatchName(arg, ns.RosterNames())

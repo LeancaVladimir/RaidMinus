@@ -67,7 +67,7 @@ ns.DETECTORS = {
 		params = {{key = "sec", name = "Секунд", default = 10}},
 		how = "Воин (не танк) за первые секунды боя ни разу не наложил Раскол брони."},
 
-	{key = "pp_bonus", boss = "bonus", hard = true, value = 10, text = "Проф: %s в босса и %s в слизней",
+	{key = "pp_bonus", boss = "putricide", hard = true, value = 10, text = "Проф: %s в босса и %s в слизней",
 		params = {{key = "boss", name = "Урон в Профа", default = 2500000}, {key = "ooze", name = "Урон в слизней", default = 650000}},
 		how = "После убийства Профа — урон по Skada: в босса и в слизней (оба порога)."},
 }
@@ -88,10 +88,11 @@ function ns.RuleParam(rule, pkey)
 	end
 end
 
--- текст правила: у автоправил — шаблон с числами РЛа
+-- текст правила: у автоправил — свой текст РЛа (rule.label) или шаблон с числами РЛа
 function ns.RuleText(rule)
 	local d = rule and ns.Detector(rule.auto)
 	if not d then return rule and rule.text or "" end
+	if rule.label and rule.label ~= "" then return rule.label end
 	if not d.params then return d.text end
 	local values = {}
 	for i, p in ipairs(d.params) do

@@ -38,6 +38,7 @@ end
 -- only — список имён для переролла ничьей; watchBy — ролл объявил этот игрок, только наблюдаем;
 -- off — ролл на офф-спек (второй ролл, если на основной спек никто не взял)
 function ns.StartRoll(e, only, watchBy, off)
+	if e then ns.FreshLink(e) end
 	if not e then return end
 	if ns.roll and ns.roll.state == "open" then
 		if not ns.roll.watch then

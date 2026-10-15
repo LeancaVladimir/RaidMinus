@@ -1,4 +1,5 @@
--- Разделы правил: боссы ЦЛК (по порядку прохождения), «Общее» и «Плюсы».
+-- Разделы правил: боссы ЦЛК (по порядку прохождения) и «Общие» — минусы и плюсы на любом боссе.
+-- Плюс, который относится к одному боссу (бонус Профа), живёт в разделе этого босса.
 -- dbm — id мода DBM (DBM-Icecrown), по нему аддон узнаёт, какой босс сейчас.
 
 local _, ns = ...
@@ -16,8 +17,7 @@ ns.SECTIONS = {
 	{key = "valithria", name = "Валитрия Сноходица", short = "Валитрия", dbm = "Valithria"},
 	{key = "sindragosa", name = "Синдрагоса", short = "Синдра", dbm = "Sindragosa"},
 	{key = "lichking", name = "Король-лич", short = "Лич", dbm = "LichKing"},
-	{key = "general", name = "Общее", short = "Общее", general = true},
-	{key = "bonus", name = "Плюсы", short = "Плюсы", general = true},
+	{key = "general", name = "Общие", short = "Общие", general = true},
 }
 
 local byKey, byDBM = {}, {}
@@ -29,10 +29,18 @@ end
 
 function ns.Section(key) return key and byKey[key] end
 
--- босс (не «Общее» и не «Плюсы»)
+-- босс (не «Общие»)
 function ns.IsBoss(key)
 	local sec = byKey[key or ""]
 	return sec and not sec.general
+end
+
+function ns.BossKeys()
+	local out = {}
+	for _, sec in ipairs(ns.SECTIONS) do
+		if not sec.general then out[#out + 1] = sec.key end
+	end
+	return out
 end
 
 function ns.BossByDBM(modId) return modId and byDBM[modId] end
@@ -41,4 +49,3 @@ function ns.ShortName(key)
 	local sec = byKey[key or ""]
 	return sec and sec.short or "—"
 end
-

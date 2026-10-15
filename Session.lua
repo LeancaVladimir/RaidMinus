@@ -105,6 +105,7 @@ function ns.StartSession(test)
 		nextId = 0,
 		pulls = {},
 		loot = {},
+		drops = {},
 		nextLoot = 0,
 	}
 	if test then
@@ -288,6 +289,7 @@ function ns.BossPulled(key)
 	s.boss = key
 	if ns.OnBossChanged then ns.OnBossChanged(key) end
 	if ns.OnFightStart then ns.OnFightStart(key) end
+	if ns.OnBossPull then ns.OnBossPull(key) end
 	ns.Refresh()
 end
 
@@ -296,6 +298,7 @@ function ns.BossKilled(key)
 	if not s or not key then return end
 	s.killed = s.killed or {}
 	s.killed[key] = true
+	s.lastKill = {boss = key, t = time()}
 	if ns.OnFightEnd then ns.OnFightEnd(key, "kill") end
 	if ns.MetricsOnKill then ns.MetricsOnKill(key) end
 	ns.Refresh()

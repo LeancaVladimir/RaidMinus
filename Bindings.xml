@@ -1,0 +1,14 @@
+<Bindings>
+	<Binding name="RAIDMINUS_TARGET" header="RAIDMINUS">
+		RaidMinus_TargetMenu()
+	</Binding>
+	<Binding name="RAIDMINUS_COMPACT">
+		RaidMinus_ToggleCompact()
+	</Binding>
+	<Binding name="RAIDMINUS_TOGGLE">
+		RaidMinus_Toggle()
+	</Binding>
+	<Binding name="RAIDMINUS_LOOT">
+		RaidMinus_LootWindow()
+	</Binding>
+</Bindings>

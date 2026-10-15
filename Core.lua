@@ -19,14 +19,23 @@ local DEFAULTS = {
 	tieTime = 15,          -- секунд на переролл ничьей
 	rollMax = 100,         -- засчитывается только /roll 1-rollMax
 	rollCountdown = true,  -- «осталось 10 сек»
-	collectLoot = true,    -- собирать в список добычу, которую лутаю я
-	lootQuality = 4,       -- от какого качества (4 — эпики)
-	dropPanel = true,      -- открыл тело или ответственный скинул список — окошко «Добыча» с кнопками «+»
-	autoDropLoot = false,  -- добавлять такую добычу в список сразу, без «+»
+	-- добыча (LootList.lua): откуда узнаём, что упало, и что из этого разыгрываем
+	lootFilter = "heroic", -- heroic — гер. снаряжение ЦЛК 25 и всё не ниже lootMinIlvl; epic — все эпики
+	lootMinIlvl = 277,     -- уровень предмета для фильтра heroic (предметы не из таблицы ЦЛК)
+	lootQuality = 4,       -- для фильтра epic: от какого качества
+	lootAuto = true,       -- добыча, прошедшая фильтр, сразу попадает в розыгрыш
+	lootPopup = "new",     -- окно «Добыча»: new — при новой добыче, missing — если что-то не в розыгрыше, off — само не открывать
+	srcCorpse = true,      -- открыл тело сам
+	srcRaidRoll = true,    -- тело открыл другой с аддоном RaidRoll (скрытый канал RRL)
+	srcChat = true,        -- строки «Вася получает добычу: [предмет]»
+	srcList = true,        -- лидер, ассистент или ответственный за добычу скинул в рейд список ссылок
 	watchOthers = true,    -- ролл объявил ответственный за добычу — предмет в список, броски считаются с минусами
 	rollLines = 10,        -- сколько строк итога ролла писать в рейд (каждый игрок — отдельной строкой)
 	reloadPrompt = true,   -- после убийства босса предложить /reload, чтобы журнал записался на диск
+	compactAuto = false,   -- мини-панель сама появляется на пуле босса, если окно закрыто
+	versionCheck = true,   -- узнавать о новой версии от других игроков с RaidMinus (рейд, гильдия)
 }
+ns.RELEASES = "github.com/LeancaVladimir/RaidMinus/releases"
 ns.HISTORY = 20 -- сколько прошлых рейдов хранить
 
 function ns.Print(msg)
@@ -200,15 +209,20 @@ local function PumpChat()
 	chatTimer = nil
 	local item = tremove(chatQueue, 1)
 	if not item then return end
-	ns.Send(item[1], item[2], nil, item[3])
+	ns.Send(item[1], item[2], item[4], item[3])
 	if #chatQueue > 0 then chatTimer = ns.After(CHAT_GAP, PumpChat) end
 end
 
-function ns.Announce(msg, warning)
+local function Queue(msg, chatType, target)
 	local s = ns.Session and ns.Session()
-	tinsert(chatQueue, {msg, ns.GroupChannel(warning), s and s.test})
+	tinsert(chatQueue, {msg, chatType, s and s.test, target})
 	if not chatTimer then chatTimer = ns.After(0, PumpChat) end
 end
+
+function ns.Announce(msg, warning) Queue(msg, ns.GroupChannel(warning)) end
+
+-- шёпот через ту же очередь (несколько шёпотов подряд — тоже флуд)
+function ns.QueueWhisper(target, msg) Queue(msg, "WHISPER", target) end
 
 -- перерисовать окно и кнопку у миникарты
 function ns.Refresh()
@@ -238,12 +252,13 @@ end)
 -- слеш-команды
 
 local HELP = {
-	"|cffffd100/rm|r — окно",
+	"|cffffd100/rm|r — окно, |cffffd100/rm мини|r — мини-панель, |cffffd100/rm добыча|r — окно добычи",
 	"|cffffd100/rm старт|r — начать рейд, |cffffd100/rm конец|r — завершить",
 	"|cffffd100/rm Имя -20 причина|r — свой минус (или +10 — плюс)",
 	"|cffffd100/rm ролл [предмет]|r — разыграть (shift+клик по предмету), |cffffd100/rm лут [предмет]|r — в список",
-	"|cffffd100/rm правила|r, |cffffd100/rm настройки|r",
+	"|cffffd100/rm правила|r, |cffffd100/rm настройки|r, |cffffd100/rm версия|r",
 	"|cffffd100/rm тест|r — тестовый рейд (25 выдуманных игроков, в чат ничего не уходит), |cffffd100/rm тест босс|r — убить босса (автоминусы, добыча), |cffffd100/rm тест чужой|r — ролл от ответственного, |cffffd100/rm тест ролл|r — броски",
+	"Клавиши (меню «Назначение клавиш» → RaidMinus): окно, мини-панель, |cffffd100минус цели|r — меню правил с цифрами 1–9.",
 	"Игроки шепчут вам |cffffd100!минус|r и получают свою сумму.",
 }
 
@@ -277,8 +292,14 @@ function ns.Command(msg)
 		ns.AddLootFromText(rest, true)
 	elseif c == "лут" or c == "loot" then
 		ns.AddLootFromText(rest, false)
+	elseif c == "мини" or c == "mini" then
+		ns.ToggleCompact()
+	elseif c == "добыча" or c == "drops" then
+		ns.ShowLootWindow()
+	elseif c == "версия" or c == "version" then
+		ns.VersionInfo()
 	elseif c == "правила" or c == "rules" then
-		ns.OpenOptions("rules")
+		ns.ShowTab("rules")
 	elseif c == "настройки" or c == "config" then
 		ns.OpenOptions("general")
 	elseif c == "помощь" or c == "help" then

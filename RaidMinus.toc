@@ -3,8 +3,9 @@
 ## Notes: Penalty and bonus points from the raid leader, added to the end-of-raid loot roll.
 ## Notes-ruRU: Минусы и плюсы от РЛа за рейд: сумма прибавляется к /roll на итоговом розыгрыше лута.
 ## Author: Leanca Vladimir (Discord: lyanka_v)
-## Version: 0.1.0
-## OptionalDeps: DBM-Core, Skada
+## Version: 0.2.0
+## X-Website: https://github.com/LeancaVladimir/RaidMinus
+## OptionalDeps: DBM-Core, Skada, RaidRoll
 ## SavedVariables: RaidMinusDB
 
 Libs\embeds.xml
@@ -13,6 +14,7 @@ Core.lua
 Data\Encounters.lua
 Data\Categories.lua
 Data\Detectors.lua
+Data\Loot.lua
 Rules.lua
 Session.lua
 Ledger.lua
@@ -21,12 +23,16 @@ LootList.lua
 Roll.lua
 Detect.lua
 Metrics.lua
+Version.lua
 Test.lua
 UI\Widgets.lua
 UI\Main.lua
 UI\Players.lua
 UI\Log.lua
 UI\Loot.lua
+UI\DropsTab.lua
 UI\Queue.lua
-UI\Drop.lua
+UI\RulesTab.lua
+UI\LootWindow.lua
+UI\Quick.lua
 Options.lua
