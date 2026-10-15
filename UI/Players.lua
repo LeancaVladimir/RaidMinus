@@ -82,7 +82,7 @@ function ns.RuleMenu(rule)
 		rule.quick = (not rule.quick) or nil
 		ns.Refresh()
 	end})
-	tinsert(menu, {text = "Настроить…", notCheckable = true, func = function() ns.EditRule(rule) end})
+	tinsert(menu, {text = "Настроить...", notCheckable = true, func = function() ns.EditRule(rule) end})
 	Menu(menu)
 end
 

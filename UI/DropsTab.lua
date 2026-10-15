@@ -25,7 +25,7 @@ end
 function ns.DropItemStatus(item)
 	local e = item.loot and ns.LootById(item.loot)
 	if e then
-		if e.winner then return "|cff60e860→|r " .. ns.ColorName(e.winner, ClassOf(e.winner)), "minus" end
+		if e.winner then return "|cff60e860выиграл|r " .. ns.ColorName(e.winner, ClassOf(e.winner)), "minus" end
 		if ns.roll and ns.roll.loot == e.id and ns.roll.state == "open" then return "|cffffd100ролл...|r", nil end
 		return "|cff60e860в розыгрыше|r", "minus"
 	end

@@ -106,17 +106,29 @@ local function Paint(b)
 	b.label:SetTextColor(tc[1], tc[2], tc[3])
 end
 
+-- width = nil — ширина по тексту (и растёт при SetLabel), иначе не меньше, чем нужно тексту
 function UI.FlatButton(parent, text, width, height, onClick, style)
 	local b = CreateFrame("Button", nil, parent)
-	b:SetWidth(width)
+	b.minWidth = width or 24
+	b:SetWidth(b.minWidth)
 	b:SetHeight(height or 22)
 	b.style = STYLES[style or "ghost"]
 	b:SetBackdrop({bgFile = FLAT, edgeFile = FLAT, edgeSize = 1})
 	b.label = b:CreateFontString(nil, "OVERLAY", b.style.font or "GameFontHighlightSmall")
-	b.label:SetPoint("LEFT", 8, 0)
-	b.label:SetPoint("RIGHT", -8, 0)
+	local pad = style == "row" and 8 or 4
+	b.label:SetPoint("LEFT", pad, 0)
+	b.label:SetPoint("RIGHT", -pad, 0)
 	b.label:SetJustifyH(style == "row" and "LEFT" or "CENTER")
 	b.label:SetText(text or "")
+	-- строки списков (row) не растут — у них ширина колонки; остальные кнопки растут под текст
+	function b:Fit()
+		if style == "row" or self.noFit then return end
+		local need = math.ceil((self.label:GetStringWidth() or 0) + 2 * pad + 4)
+		if need > self:GetWidth() or (width == nil and need ~= self:GetWidth()) then
+			self:SetWidth(math.max(self.minWidth, need))
+		end
+	end
+	b:Fit()
 	b:RegisterForClicks("LeftButtonUp", "RightButtonUp")
 	if onClick then b:SetScript("OnClick", onClick) end
 	b:SetScript("OnEnter", function(self)
@@ -132,7 +144,10 @@ function UI.FlatButton(parent, text, width, height, onClick, style)
 		Paint(self)
 		GameTooltip:Hide()
 	end)
-	function b:SetLabel(t) self.label:SetText(t or "") end
+	function b:SetLabel(t)
+		self.label:SetText(t or "")
+		self:Fit()
+	end
 	function b:SetSelected(on)
 		self.selected = on and true or nil
 		Paint(self)
@@ -162,7 +177,7 @@ function UI.Seg(parent, options, onSelect)
 			onSelect(key)
 		end, "seg")
 		b:SetPoint("LEFT", x, 0)
-		x = x + (o[3] or 80) - 1
+		x = x + b:GetWidth() - 1 -- кнопка могла вырасти под текст
 		seg.buttons[key] = b
 	end
 	seg:SetWidth(x + 1)
@@ -177,11 +192,14 @@ end
 -- выпадающий список: getItems() -> {{key, text}}, onSelect(key); dd:SetValue(key, text)
 local menuFrame
 function UI.Dropdown(parent, width, getItems, onSelect)
-	local dd = UI.FlatButton(parent, "", width, 22, nil, "ghost")
-	dd.label:SetJustifyH("LEFT")
-	local arrow = UI.Text(dd, "GameFontDisableSmall", "RIGHT")
-	arrow:SetPoint("RIGHT", -2, 0)
-	arrow:SetText("|TInterface\\Buttons\\UI-ScrollBar-ScrollDownButton-Up:18|t")
+	local dd = UI.FlatButton(parent, "", width, 22, nil, "row")
+	dd.style = STYLES.ghost
+	dd:SetSelected(false)
+	local arrow = dd:CreateTexture(nil, "OVERLAY")
+	arrow:SetTexture("Interface\\Buttons\\UI-ScrollBar-ScrollDownButton-Up")
+	arrow:SetWidth(20)
+	arrow:SetHeight(20)
+	arrow:SetPoint("RIGHT", 0, 0)
 	dd.label:SetPoint("RIGHT", -20, 0)
 	dd:SetScript("OnClick", function(self)
 		if not menuFrame then menuFrame = CreateFrame("Frame", "RaidMinusDropMenu", UIParent, "UIDropDownMenuTemplate") end

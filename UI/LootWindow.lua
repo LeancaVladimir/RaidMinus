@@ -11,8 +11,24 @@ local ipairs = ipairs
 
 local W, ROWS, ROW_H = 400, 8, 34
 local ALERT = "Interface\\DialogFrame\\UI-Dialog-Icon-AlertNew"
-local PREV, NEXT = "Interface\\Buttons\\UI-SpellbookIcon-PrevPage-Up", "Interface\\Buttons\\UI-SpellbookIcon-NextPage-Up"
-local PILL_W, PILLS_PER_ROW = 62, 6
+local PREV, NEXT = "Interface\\Buttons\\UI-SpellbookIcon-PrevPage", "Interface\\Buttons\\UI-SpellbookIcon-NextPage"
+local PILL_W, PILLS_PER_ROW = 72, 5
+
+-- стрелка листания, как в книге заклинаний: картинки -Up, -Down, -Disabled
+local function PageButton(parent, base, onClick)
+	local b = CreateFrame("Button", nil, parent)
+	b:SetWidth(32)
+	b:SetHeight(32)
+	b:SetNormalTexture(base .. "-Up")
+	b:SetPushedTexture(base .. "-Down")
+	b:SetDisabledTexture(base .. "-Disabled")
+	b:SetHighlightTexture("Interface\\Buttons\\UI-Common-MouseHilight", "ADD")
+	b:SetScript("OnClick", onClick)
+	function b:SetEnabledFlat(on)
+		if on then self:Enable() else self:Disable() end
+	end
+	return b
+end
 
 local panel, title, sub, meta, prevBtn, nextBtn, warn, list, hiddenText, addAll
 local pills = {}
@@ -123,10 +139,10 @@ local function Create()
 	UI.Panel(panel)
 	UI.TitleBar(panel, "Raid|cffff5050Minus|r: добыча")
 
-	prevBtn = UI.FlatButton(panel, "|T" .. PREV .. ":24|t", 30, 30, function() Go(CurrentIndex(Pages()) - 1) end, "ghost")
-	prevBtn:SetPoint("TOPLEFT", 10, -38)
-	nextBtn = UI.FlatButton(panel, "|T" .. NEXT .. ":24|t", 30, 30, function() Go(CurrentIndex(Pages()) + 1) end, "ghost")
-	nextBtn:SetPoint("TOPRIGHT", -10, -38)
+	prevBtn = PageButton(panel, PREV, function() Go(CurrentIndex(Pages()) - 1) end)
+	prevBtn:SetPoint("TOPLEFT", 10, -36)
+	nextBtn = PageButton(panel, NEXT, function() Go(CurrentIndex(Pages()) + 1) end)
+	nextBtn:SetPoint("TOPRIGHT", -10, -36)
 	title = UI.Text(panel, "GameFontNormalLarge", "CENTER")
 	title:SetPoint("TOPLEFT", prevBtn, "TOPRIGHT", 6, 0)
 	title:SetPoint("TOPRIGHT", nextBtn, "TOPLEFT", -6, 0)
@@ -138,6 +154,7 @@ local function Create()
 
 	warn = UI.FlatButton(panel, "", W - 20, 22, nil, "ghost")
 	warn:SetPoint("TOPLEFT", 10, -92)
+	warn.noFit = true
 	warn:SetBackdropColor(1, 0.82, 0, 0.1)
 	warn.label:SetJustifyH("LEFT")
 	warn:SetTextColor(UI.GOLD)
@@ -167,6 +184,7 @@ local function PillFor(i)
 	local b = pills[i]
 	if b then return b end
 	b = UI.FlatButton(panel, "", PILL_W, 20, function(self) Go(self.index) end, "pill")
+	b.noFit = true -- кнопки стоят сеткой
 	local col, line = (i - 1) % PILLS_PER_ROW, math.floor((i - 1) / PILLS_PER_ROW)
 	b:SetPoint("TOPLEFT", list, "BOTTOMLEFT", col * (PILL_W + 3), -22 - line * 23)
 	pills[i] = b

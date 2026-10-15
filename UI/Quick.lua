@@ -17,7 +17,7 @@ local MENU_W, ROW_H = 300, 22
 BINDING_HEADER_RAIDMINUS = "RaidMinus"
 BINDING_NAME_RAIDMINUS_TOGGLE = "Окно RaidMinus"
 BINDING_NAME_RAIDMINUS_COMPACT = "Мини-панель"
-BINDING_NAME_RAIDMINUS_TARGET = "Минус цели (меню с цифрами 1–9)"
+BINDING_NAME_RAIDMINUS_TARGET = "Минус цели (меню с цифрами 1-9)"
 BINDING_NAME_RAIDMINUS_LOOT = "Окно «Добыча»"
 
 function RaidMinus_Toggle() ns.ToggleWindow() end
@@ -144,7 +144,7 @@ local function CreateMenu()
 	menu.title:SetPoint("LEFT", head, "LEFT", 8, 0)
 	menu.title:SetPoint("RIGHT", head, "RIGHT", -8, 0)
 	menu.hint = UI.Text(menu, "GameFontDisableSmall")
-	menu.hint:SetText("1–9 — поставить · 0 — окно · Esc — закрыть")
+	menu.hint:SetText("1-9 — поставить · 0 — окно · Esc — закрыть")
 	menu:EnableKeyboard(true)
 	menu:SetScript("OnKeyDown", function(self, key)
 		if MODIFIERS[key] then return end -- Shift/Ctrl/Alt сами по себе меню не закрывают
@@ -253,6 +253,7 @@ local function CreateCompact()
 		local b = UI.FlatButton(compact, "", 172, 24, function(self)
 			if self.rule then ApplyQuick(self.rule) end
 		end, "ghost")
+		b.noFit = true -- кнопки стоят сеткой в два столбца
 		b.label:SetJustifyH("LEFT")
 		b.label:SetFontObject("GameFontHighlightSmall")
 		b.label:SetPoint("RIGHT", -36, 0)

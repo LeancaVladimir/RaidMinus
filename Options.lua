@@ -55,7 +55,7 @@ local options = {
 				hdrChat = {type = "header", name = "Объявления и шёпот", order = 1},
 				announce = {
 					type = "select", name = "Объявлять минусы в рейд", order = 2, width = "double",
-					desc = "У каждого правила можно выбрать своё (вкладка «Правила» → «Объявление»).",
+					desc = "У каждого правила можно выбрать своё (вкладка «Правила», поле «Объявление»).",
 					values = {instant = "сразу после клика", combat = "после боя (в бою копятся)", off = "не объявлять"},
 				},
 				whisper = {type = "toggle", name = "Отвечать на !минус в шёпот", order = 3, width = "full"},
@@ -66,7 +66,7 @@ local options = {
 				rollTime = {type = "range", name = "Время на ролл, сек", order = 11, min = 10, max = 120, step = 5},
 				tieTime = {type = "range", name = "Переролл ничьей, сек", order = 12, min = 5, max = 60, step = 5},
 				rollMax = {
-					type = "input", name = "Засчитывать /roll 1–N, N =", order = 13,
+					type = "input", name = "Засчитывать /roll 1-N, N =", order = 13,
 					get = function() return tostring(ns.DB.settings.rollMax) end,
 					validate = function(_, v)
 						local n = tonumber(v)
@@ -85,7 +85,7 @@ local options = {
 
 				hdrLoot = {type = "header", name = "Добыча", order = 20},
 				lootDesc = {type = "description", order = 20.1, fontSize = "medium",
-					name = "Аддон сам узнаёт, что упало с босса, даже если тело открывали не вы, и записывает важное в розыгрыш. Окно «Добыча» (/rm добыча) листает боссов ◀ ▶ и показывает, что не включено."},
+					name = "Аддон сам узнаёт, что упало с босса, даже если тело открывали не вы, и записывает важное в розыгрыш. Окно «Добыча» (/rm добыча) листает боссов стрелками и показывает, что не включено."},
 				lootFilter = {
 					type = "select", name = "Что разыгрывать", order = 21, width = "double",
 					values = {heroic = "гер. снаряжение ЦЛК 25, жетоны, маунт (осколки, саронит — нет)", epic = "все эпики (кроме мусора)"},
@@ -107,7 +107,7 @@ local options = {
 				srcList = {type = "toggle", name = "Источник: список ссылок от лидера, ассистента или ответственного", order = 28, width = "full"},
 
 				hdrQuick = {type = "header", name = "Быстрые минусы и клавиши", order = 30},
-				keyTarget = Binding("RAIDMINUS_TARGET", "Минус цели (меню 1–9)", 31,
+				keyTarget = Binding("RAIDMINUS_TARGET", "Минус цели (меню 1-9)", 31,
 					"Возьмите игрока рейда в цель и нажмите: у курсора меню правил текущего босса и быстрых «Общих», цифра — поставить."),
 				keyCompact = Binding("RAIDMINUS_COMPACT", "Мини-панель", 32),
 				keyToggle = Binding("RAIDMINUS_TOGGLE", "Окно RaidMinus", 33),

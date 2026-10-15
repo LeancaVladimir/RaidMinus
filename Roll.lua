@@ -185,7 +185,7 @@ function ns.AnnounceResult(e)
 	if not res then return end
 	res.announced = true
 	if res.winner then
-		ns.Announce(format("{rt1} %s → %s (%s)%s", e.link, res.winner, ns.RollText(res), res.off and " — офф-спек" or ""), true)
+		ns.Announce(format("{rt1} %s — %s (%s)%s", e.link, res.winner, ns.RollText(res), res.off and " — офф-спек" or ""), true)
 	elseif res.tie then
 		ns.Announce(format("{rt3} %s: ничья — %s", e.link, tconcat(res.tie, ", ")), true)
 	else
