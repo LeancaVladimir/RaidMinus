@@ -33,7 +33,6 @@ local DEFAULTS = {
 	sync = true,           -- ролл виден у всех с RaidMinus: кто разыгрывает, итог, кто получил (Sync.lua)
 	tradeWarn = true,      -- предупреждать, когда на передачу предмета остаётся мало времени
 	watchOthers = true,    -- ролл объявил ответственный за добычу — предмет в список, броски считаются с минусами
-	rollLines = 10,        -- сколько строк итога ролла писать в рейд (каждый игрок — отдельной строкой)
 	reloadPrompt = true,   -- после убийства босса предложить /reload, чтобы журнал записался на диск
 	compactAuto = false,   -- мини-панель сама появляется на пуле босса, если окно закрыто
 	versionCheck = true,   -- узнавать о новой версии от других игроков с RaidMinus (рейд, гильдия)
@@ -224,8 +223,22 @@ local function PumpChat()
 	if #chatQueue > 0 then chatTimer = ns.After(CHAT_GAP, PumpChat) end
 end
 
+-- что аддон сам написал в рейд (чтобы своё объявление «Ролл [предмет]» не принять за ручное)
+ns.sentByAddon = {}
+function ns.SentByAddon(msg)
+	local t = ns.sentByAddon[msg]
+	return t and GetTime() - t < 30
+end
+
 local function Queue(msg, chatType, target)
 	local s = ns.Session and ns.Session()
+	if chatType ~= "WHISPER" then
+		local now = GetTime()
+		for k, t in pairs(ns.sentByAddon) do
+			if now - t > 60 then ns.sentByAddon[k] = nil end
+		end
+		ns.sentByAddon[msg] = now
+	end
 	tinsert(chatQueue, {msg, chatType, s and s.test, target})
 	if not chatTimer then chatTimer = ns.After(0, PumpChat) end
 end

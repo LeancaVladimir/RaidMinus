@@ -75,8 +75,6 @@ local options = {
 					end,
 					set = function(_, v) ns.DB.settings.rollMax = tonumber(v) end,
 				},
-				rollLines = {type = "range", name = "Строк итога в рейд", order = 13.5, min = 3, max = 25, step = 1,
-					desc = "Итог ролла пишется в рейд построчно: каждый игрок отдельным сообщением, победитель со звездой. Не засчитанные — ещё до 5 строк."},
 				rollCountdown = {type = "toggle", name = "Напоминать «осталось 10 сек»", order = 14, width = "full"},
 				watchOthers = {
 					type = "toggle", name = "Чужой ролл: предмет в список, броски считаю с минусами", order = 15, width = "full",

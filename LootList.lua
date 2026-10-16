@@ -409,19 +409,27 @@ function ns.SetReceiver(e, name, how, note)
 	ns.Refresh()
 end
 
--- предмет попал к игроку (чат лута, обмен): запись, где он победитель, иначе разыгранная, иначе любая
+-- предмет попал к игроку (чат лута, обмен). Уже разыгран — он «получил» (запись, где он победитель,
+-- иначе любая разыгранная). Ещё не разыгран — он только держит предмет до ролла (взял из тела, передали).
 function ns.AutoReceiver(id, name, how)
-	local best, rolled, any
+	local best, rolled, unrolled
 	for _, e in ipairs(ns.LootByItem(id)) do
 		if not e.receiver then
-			if e.winner == name and not best then best = e end
+			if e.result and e.winner == name and not best then best = e end
 			if e.result and not rolled then rolled = e end
-			if not any then any = e end
+			if not e.result and not unrolled then unrolled = e end
 		end
 	end
-	local e = best or rolled or any
-	if e then ns.SetReceiver(e, name, how) end
-	return e
+	local e = best or rolled
+	if e then
+		ns.SetReceiver(e, name, how)
+		return e
+	end
+	if unrolled then
+		unrolled.holder = name
+		ns.Refresh()
+	end
+	return unrolled
 end
 
 -- время на передачу: точное (из сумки, от лутера) или оценка от времени убийства
@@ -600,15 +608,24 @@ local function HasWord(text, words)
 	end
 end
 
--- сообщение в рейд или группу (тестовый рейд вызывает напрямую — «ответственный объявил ролл»)
-function ns.OnGroupMessage(msg, sender)
-	if not ns.Session() or sender == ns.PlayerName() then return end
+-- Сообщение в рейд или группу (тестовый рейд вызывает напрямую — «ответственный объявил ролл»).
+-- Как обычно разыгрывают: РЛ, помощник или ответственный кидает ссылку на предмет в объявление рейду
+-- (/ов) — без слов — и игроки бросают /roll. Поэтому:
+--   одна ссылка в объявлении рейду — ролл (слово «ролл» не нужно);
+--   одна ссылка в обычном чате рейда со словом «ролл»/«кидаем» — тоже ролл;
+--   одна ссылка без слов в обычном чате — ролл, если в следующие 30 сек пошли броски (Roll.lua);
+--   несколько ссылок — список добычи.
+-- Свои сообщения РЛа тоже считаются (он мог кинуть ссылку руками), кроме того, что написал сам аддон.
+function ns.OnGroupMessage(msg, sender, event)
+	if not ns.Session() then return end
+	local me = sender == ns.PlayerName()
+	if me and (ns.SentByAddon(msg) or msg:find("{rt", 1, true)) then return end -- это написал аддон
 	local links = {}
 	for link in msg:gmatch(LINK) do
 		if (ns.LinkQuality(link) or 0) >= 4 then tinsert(links, link) end
 	end
 	if #links == 0 then return end
-	if not ns.officers[sender] then
+	if not me and not ns.officers[sender] then
 		ns.LootLog("list", sender, format("%d ссылок — пропущено: не РЛ, не помощник и не ответственный за добычу", #links))
 		return
 	end
@@ -628,20 +645,25 @@ function ns.OnGroupMessage(msg, sender)
 		return
 	end
 
-	if #links == 1 and HasWord(text, ROLL_WORDS) then
-		if not Settings().watchOthers then return end
+	if #links == 1 then
+		local link = links[1]
 		local r = ns.roll
-		if r and r.state == "open" and ns.ItemId(r.link) == ns.ItemId(links[1]) then return end -- уже считаю (синхронизация)
-		local e = ns.AddLoot(links[1], "announce", sender)
-		ns.LootLog("announce", sender, links[1] .. " — ролл, считаю броски")
-		if e then ns.WatchRoll(e, sender) end
+		if r and r.state == "open" and ns.ItemId(r.link) == ns.ItemId(link) then return end -- уже считаю
+		if event == "CHAT_MSG_RAID_WARNING" or HasWord(text, ROLL_WORDS) then
+			if not Settings().watchOthers then return end
+			ns.lastLinked = nil
+			local e = ns.AddLoot(link, "announce", sender)
+			ns.LootLog("announce", sender, link .. " — ролл, считаю броски")
+			if e then ns.WatchRoll(e, sender) end
+		else
+			-- ссылка без слов: ролл ли это, станет ясно по броскам
+			ns.lastLinked = {link = link, sender = sender, t = GetTime()}
+			ns.LootLog("list", sender, link .. " — без слова «ролл»: начну считать, если пойдут броски")
+		end
 		return
 	end
-	if #links == 1 then
-		ns.LootLog("list", sender, links[1] .. " — нет слова «ролл», не засчитано как ролл")
-	end
 
-	if #links >= 2 and Settings().srcList then
+	if Settings().srcList then
 		local items = {}
 		for _, link in ipairs(links) do tinsert(items, {id = ns.ItemId(link), link = link}) end
 		ns.ReportLoot("list", sender, nil, items)
@@ -649,5 +671,5 @@ function ns.OnGroupMessage(msg, sender)
 end
 
 for _, event in ipairs({"CHAT_MSG_RAID", "CHAT_MSG_RAID_LEADER", "CHAT_MSG_RAID_WARNING", "CHAT_MSG_PARTY", "CHAT_MSG_PARTY_LEADER"}) do
-	ns.On(event, function(msg, sender) ns.OnGroupMessage(msg, sender) end)
+	ns.On(event, function(msg, sender) ns.OnGroupMessage(msg, sender, event) end)
 end

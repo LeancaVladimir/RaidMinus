@@ -131,15 +131,33 @@ function ns.OnRoll(name, roll, low, high)
 	if ns.RefreshRoll then ns.RefreshRoll() end
 end
 
+local LINKED_WAIT = 30 -- сек: ссылку без слов считаем роллом, если броски пошли в это время
+
 ns.On("CHAT_MSG_SYSTEM", function(msg)
-	if not ns.roll or ns.roll.state ~= "open" then return end
+	local open = ns.roll and ns.roll.state == "open"
+	if not open and not ns.lastLinked then return end
 	local name, roll, low, high
 	if ROLL_PATTERN then name, roll, low, high = msg:match(ROLL_PATTERN) end
 	if not name then
 		-- запасной разбор: «Имя ... 57 (1-100)»
 		name, roll, low, high = msg:match("^(%S+) .-(%d+) %((%d+)%-(%d+)%)")
 	end
-	if name then ns.OnRoll(name, tonumber(roll), tonumber(low), tonumber(high)) end
+	if not name then return end
+	if not open then
+		-- РЛ или лутер кинул ссылку без слов, и пошли броски — значит, это ролл: начинаю считать
+		local l = ns.lastLinked
+		if GetTime() - l.t > LINKED_WAIT then
+			ns.lastLinked = nil
+			return
+		end
+		if not ns.Session() or not ns.IsHere(name) then return end
+		ns.lastLinked = nil
+		local e = ns.AddLoot(l.link, "announce", l.sender)
+		ns.LootLog("announce", l.sender, l.link .. " — пошли броски, считаю")
+		if e then ns.WatchRoll(e, l.sender) end
+		if not (ns.roll and ns.roll.state == "open") then return end
+	end
+	ns.OnRoll(name, tonumber(roll), tonumber(low), tonumber(high))
 end)
 
 -- считает модификатор, итог и допуск; сортирует: допущенные выше, по итогу
@@ -172,42 +190,13 @@ local function CopyEntries(list)
 	return out
 end
 
--- строки итога для рейда: каждый игрок отдельным сообщением, победитель — со звездой
-local function RollLines(entries, winner, tied)
-	local lines, limit = {}, Settings().rollLines or 10
-	local count, place, prev, hidden, rejected = 0, 0, nil, 0, 0
-	for _, x in ipairs(entries) do
-		if x.ok then
-			count = count + 1
-			if x.final ~= prev then place, prev = count, x.final end -- равный итог — одно место
-			if count <= limit or x.name == winner or (tied and tied[x.name]) then
-				local mark, tail = "", ""
-				if x.name == winner then
-					mark, tail = "{rt1} ", " — победитель"
-				elseif tied and tied[x.name] then
-					mark, tail = "{rt3} ", " — ничья"
-				end
-				local roll = (x.mod and x.mod ~= 0) and format(" (%d %s)", x.roll, ns.ValueText(x.mod)) or ""
-				tinsert(lines, format("%s%d. %s — %d%s%s", mark, place, x.name, x.final, roll, tail))
-			else
-				hidden = hidden + 1
-			end
-		end
-	end
-	if hidden > 0 then tinsert(lines, format("... и ещё %d", hidden)) end
-	for _, x in ipairs(entries) do
-		if not x.ok then
-			rejected = rejected + 1
-			if rejected <= 5 then
-				tinsert(lines, format("{rt7} %s — %d, не засчитан: %s", x.name, x.roll, x.reason))
-			end
-		end
-	end
-	if rejected > 5 then tinsert(lines, format("{rt7} ... и ещё не засчитано: %d", rejected - 5)) end
-	return lines
+-- кому достаётся предмет: выбранный РЛом (получил другой) или победитель
+function ns.LootOwner(e)
+	return e and (e.receiver or e.winner)
 end
 
--- объявить итог в чат (после своего ролла — сразу, после наблюдения — по кнопке)
+-- объявить итог в обычный чат рейда одной строкой: «[предмет] — Имя» (после своего ролла — сразу,
+-- после наблюдения — по кнопке). Таблица бросков в чат не идёт: она видна в окне.
 function ns.AnnounceResult(e)
 	local res = e and e.result
 	if not res then return end
@@ -216,19 +205,14 @@ function ns.AnnounceResult(e)
 		return
 	end
 	res.announced = true
-	if res.winner then
-		ns.Announce(format("{rt1} %s — %s (%s)%s", e.link, res.winner, ns.RollText(res), res.off and " — офф-спек" or ""), true)
+	local owner = ns.LootOwner(e)
+	if owner then
+		ns.Announce(format("%s — %s%s", e.link, owner, res.off and " (офф-спек)" or ""))
 	elseif res.tie then
-		ns.Announce(format("{rt3} %s: ничья — %s", e.link, tconcat(res.tie, ", ")), true)
+		ns.Announce(format("%s — ничья: %s", e.link, tconcat(res.tie, ", ")))
 	else
-		ns.Announce(e.link .. ": " .. (#res.entries > 0 and "никто из бросивших не допущен" or "никто не бросил"), true)
+		ns.Announce(format("%s — никто", e.link))
 	end
-	local tied
-	if res.tie then
-		tied = {}
-		for _, name in ipairs(res.tie) do tied[name] = true end
-	end
-	for _, line in ipairs(RollLines(res.entries, res.winner, tied)) do ns.Announce(line) end
 	ns.Refresh()
 end
 
@@ -260,9 +244,7 @@ function ns.FinishRoll(announce)
 
 	if #tied > 1 then
 		if announce then
-			local set = {}
-			for _, name in ipairs(tied) do set[name] = true end
-			for _, line in ipairs(RollLines(r.entries, nil, set)) do ns.Announce(line) end
+			-- ничья: объявление переролла («Ничья! Перекидывают …») делает StartRoll
 			e.rounds = e.rounds or {}
 			tinsert(e.rounds, CopyEntries(r.entries))
 			ns.StartRoll(e, tied, nil, r.off)

@@ -16,28 +16,6 @@ local lootList, rollList, input, removeBtn
 local itemBtn, catText, stateText, startBtn, finishBtn, cancelBtn, chatBtn, testBtn, foreignBtn, offBtn, receiverBtn
 local shownWinner, shownTie -- для строк таблицы
 
--- выиграл один, а получил другой (ролл за друга, случайный бросок): кто фактически получил
-StaticPopupDialogs["RAIDMINUS_RECEIVER"] = {
-	text = "Кто фактически получил %s?\nПусто — получил победитель.",
-	button1 = OKAY,
-	button2 = CANCEL,
-	hasEditBox = 1,
-	maxLetters = 40,
-	OnShow = function(self, e)
-		local edit = _G[self:GetName() .. "EditBox"]
-		edit:SetText(e and e.receiver or "")
-		edit:SetFocus()
-	end,
-	OnAccept = function(self, e) ns.SetReceiverByText(e, _G[self:GetName() .. "EditBox"]:GetText()) end,
-	EditBoxOnEnterPressed = function(self)
-		local dialog = self:GetParent()
-		ns.SetReceiverByText(dialog.data, self:GetText())
-		dialog:Hide()
-	end,
-	EditBoxOnEscapePressed = function(self) self:GetParent():Hide() end,
-	timeout = 0, whileDead = 1, hideOnEscape = 1, preferredIndex = 3,
-}
-
 function ns.SetReceiverByText(e, text)
 	if not e then return end
 	text = strtrim(text or "")
@@ -58,6 +36,62 @@ local function SelectedLoot()
 	end
 	return e
 end
+
+-- выиграл один, а получил другой (ролл за друга, случайный бросок): РЛ выбирает игрока в таблице бросков
+-- (или в списке «Отдать другому» — если он не бросал) и жмёт «Закончить» — предмет записан на него.
+
+-- выбранный в таблице игрок (только для этого предмета)
+local function Pick(e)
+	if e and ns.ui.rollPickLoot == e.id then return ns.ui.rollPick end
+end
+
+-- отдать предмет игроку: победителю — снять пометку, другому — «получил» (в «Итог в чат» пойдёт он)
+local function GiveTo(e, name)
+	if not e or not name then return end
+	ns.SetReceiver(e, name ~= e.winner and name or nil, "вручную")
+end
+
+-- «Закончить розыгрыш»: закрыть ролл; выбран игрок — предмет ему (ничьи и чужой победитель не важны),
+-- и в чат рейда одна строка «[предмет] — выбранный». После ролла — просто отдать выбранному.
+local function FinishOrGive()
+	local e = SelectedLoot()
+	if not e then return end
+	local pick = Pick(e)
+	local r = ns.roll
+	if r and r.loot == e.id and r.state == "open" then
+		if pick then
+			ns.FinishRoll(false)
+			GiveTo(e, pick)
+			if ns.CanManageLoot() then ns.AnnounceResult(e) end
+		else
+			ns.FinishRoll(true)
+		end
+	elseif pick then
+		GiveTo(e, pick)
+	end
+	ns.ui.rollPick, ns.ui.rollPickLoot = nil, nil
+	ns.Refresh()
+end
+
+-- список рейда: кому отдать, если игрок не бросал
+local giveMenu
+local function GiveMenu(e)
+	if not giveMenu then giveMenu = CreateFrame("Frame", "RaidMinusGiveMenu", UIParent, "UIDropDownMenuTemplate") end
+	local menu = {{text = "Кто получил " .. e.link .. "?", isTitle = true, notCheckable = true}}
+	if e.receiver then
+		tinsert(menu, {text = "победитель" .. (e.winner and (" (" .. e.winner .. ")") or "") .. " — снять пометку",
+			notCheckable = true, func = function() ns.SetReceiver(e, nil, "вручную") end})
+	end
+	for _, p in ipairs(ns.RosterList()) do
+		if not p.gone then
+			local name = p.name
+			tinsert(menu, {text = ns.ColorName(name, p.class), checked = e.receiver == name,
+				func = function() GiveTo(e, name) end})
+		end
+	end
+	EasyMenu(menu, giveMenu, "cursor", 0, 0, "MENU")
+end
+
 
 local function AddFromCursor()
 	local kind, _, link = GetCursorInfo()
@@ -159,6 +193,17 @@ local function MakeRollRow(row)
 	row.mark:SetHeight(14)
 	row.mark:SetPoint("LEFT", 2, 0)
 	for _, c in ipairs(COLS) do row[c[1]] = Col(row, c[3], c[4], c[5]) end
+	-- клик — выбрать игрока: «Закончить розыгрыш» отдаст предмет ему (ещё клик — снять выбор)
+	row:SetScript("OnClick", function(self)
+		local en, e = self.item, SelectedLoot()
+		if not en or not e then return end
+		if Pick(e) == en.name then
+			ns.ui.rollPick, ns.ui.rollPickLoot = nil, nil
+		else
+			ns.ui.rollPick, ns.ui.rollPickLoot = en.name, e.id
+		end
+		ns.RefreshUI()
+	end)
 	-- подсказка: за что у игрока минусы
 	UI.Tooltip(row, function(tt, self)
 		local e = self.item
@@ -168,6 +213,7 @@ local function MakeRollRow(row)
 		for _, ev in ipairs(ns.PlayerEvents(e.name)) do
 			tt:AddDoubleLine(ns.ShortName(ev.boss) .. ": " .. ns.ShortText(ev.text), ns.ValueColor(ev.value), 0.9, 0.9, 0.9)
 		end
+		tt:AddLine("Клик — выбрать: «Закончить розыгрыш» отдаст предмет ему", 0.6, 0.6, 0.6, true)
 	end)
 end
 
@@ -186,6 +232,7 @@ local function DrawRollRow(row, e, i)
 		row.mark:Hide()
 		row.bg:SetTexture(0, 0, 0, 0)
 	end
+	if Pick(SelectedLoot()) == e.name then row.bg:SetTexture(0.25, 0.5, 1, 0.3) end -- выбран: отдать ему
 	row.place:SetText(e.ok and i or "")
 	row.name:SetText(ns.ColorName(e.name, ClassOf(e.name)))
 	local role, cur = ns.PlayerRole(e.name)
@@ -289,12 +336,14 @@ local function Create(f)
 		if e.result and e.result.tie then ns.StartRoll(e, e.result.tie) else ns.StartRoll(e) end
 	end)
 	startBtn:SetPoint("TOPLEFT", rollList, "BOTTOMLEFT", 0, -6)
-	finishBtn = UI.Button(f, "Закончить розыгрыш", 150, function() ns.FinishRoll(true) end)
+	finishBtn = UI.Button(f, "Закончить розыгрыш", 180, FinishOrGive)
 	finishBtn:SetPoint("LEFT", startBtn, "RIGHT", 4, 0)
 	UI.Tooltip(finishBtn, function(tt)
 		tt:SetText("Закончить розыгрыш")
-		tt:AddLine("Перестать принимать броски, посчитать итог с минусами и написать его в рейд: каждый игрок отдельной строкой, победитель со звездой.", 1, 1, 1, true)
+		tt:AddLine("Перестать принимать броски, посчитать итог с минусами и написать в чат рейда одну строку: «[предмет] — победитель».", 1, 1, 1, true)
+		tt:AddLine("Выбран игрок в таблице (клик по строке) — предмет достаётся ему, и в чат идёт он: выиграл один, а получил другой (ролл за друга, случайный бросок). После ролла кнопка просто отдаёт выбранному, а «Итог в чат» напишет его.", 0.6, 0.8, 1, true)
 	end)
+	if finishBtn.SetMotionScriptsWhileDisabled then finishBtn:SetMotionScriptsWhileDisabled(true) end
 	cancelBtn = UI.Button(f, "Отменить", 80, function() ns.CancelRoll() end)
 	cancelBtn:SetPoint("LEFT", finishBtn, "RIGHT", 4, 0)
 	offBtn = UI.Button(f, "Ролл на офф-спек", 130, function()
@@ -311,15 +360,15 @@ local function Create(f)
 	UI.Tooltip(chatBtn, function(tt)
 		tt:SetText("Написать итог этого предмета в рейд ещё раз")
 	end)
-	receiverBtn = UI.Button(f, "Получил другой", 124, function()
+	receiverBtn = UI.Button(f, "Отдать другому", 124, function()
 		local e = SelectedLoot()
-		if e then StaticPopup_Show("RAIDMINUS_RECEIVER", e.link, nil, e) end
+		if e then GiveMenu(e) end
 	end)
 	receiverBtn:SetPoint("LEFT", chatBtn, "RIGHT", 4, 0)
 	UI.Tooltip(receiverBtn, function(tt)
-		tt:SetText("Кто фактически получил предмет")
-		tt:AddLine("Выиграл один, а забрал другой (ролл за друга, случайный бросок). Видно в истории и у других с RaidMinus. "
-			.. "Сам аддон ставит это по строке «… получает добычу» и по вашему обмену.", 1, 1, 1, true)
+		tt:SetText("Отдать игроку, который не бросал")
+		tt:AddLine("Список рейда: клик по имени — предмет записан на него. Если игрок бросал — проще выбрать его в таблице и нажать «Закончить розыгрыш». "
+			.. "Сам аддон ставит «получил» по строке «… получает добычу» и по вашему обмену.", 1, 1, 1, true)
 	end)
 	-- кнопки ролла — только у РЛа, помощника и ответственного за добычу; пока идёт чужой ролл — нельзя
 	local function RightsTip(tt, self)
@@ -450,7 +499,18 @@ local function Update()
 	else
 		startBtn:SetText("Начать ролл")
 	end
-	if live and rights then finishBtn:Enable() else finishBtn:Disable() end
+	-- «Закончить»: идёт ролл — закрыть (и отдать выбранному); после ролла — отдать выбранному другому
+	local pick = Pick(e)
+	if live then
+		finishBtn:SetText(pick and ("Закончить: " .. pick) or "Закончить розыгрыш")
+		if rights then finishBtn:Enable() else finishBtn:Disable() end
+	elseif pick and pick ~= (e.receiver or e.winner) then
+		finishBtn:SetText("Отдать: " .. pick)
+		finishBtn:Enable()
+	else
+		finishBtn:SetText("Закончить розыгрыш")
+		finishBtn:Disable()
+	end
 	if live then cancelBtn:Enable() else cancelBtn:Disable() end
 	if e.result and not live and rights then chatBtn:Enable() else chatBtn:Disable() end
 end
