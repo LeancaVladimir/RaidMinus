@@ -10,12 +10,13 @@ local format, date, tconcat = string.format, date, table.concat
 
 local W, H = 960, 640
 local TABS = {
-	{key = "players", name = "Минусы", w = 80},
-	{key = "log", name = "Журнал", w = 76},
-	{key = "loot", name = "Розыгрыш", w = 90},
-	{key = "drops", name = "Добыча", w = 86},
-	{key = "queue", name = "На проверку", w = 112},
-	{key = "rules", name = "Правила", w = 80, noSession = true},
+	{key = "players", name = "Минусы", w = 78},
+	{key = "log", name = "Журнал", w = 72},
+	{key = "loot", name = "Розыгрыш", w = 86},
+	{key = "drops", name = "Добыча", w = 80},
+	{key = "queue", name = "Проверка", w = 82},
+	{key = "rules", name = "Правила", w = 76, noSession = true},
+	{key = "history", name = "История", w = 78, noSession = true},
 }
 
 local frame, content, status, noSession, feedText, undoBtn
@@ -191,8 +192,14 @@ local function CreateWindow()
 	line:SetHeight(1)
 
 	-- кнопки справа от вкладок
-	local settingsBtn = UI.FlatButton(frame, "Настройки", 84, 22, function() ns.OpenOptions("general") end, "ghost")
-	settingsBtn:SetPoint("TOPRIGHT", -10, -36)
+	local settingsBtn = CreateFrame("Button", nil, frame)
+	settingsBtn:SetWidth(24)
+	settingsBtn:SetHeight(24)
+	settingsBtn:SetNormalTexture("Interface\\Icons\\INV_Misc_Gear_01")
+	settingsBtn:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
+	settingsBtn:SetScript("OnClick", function() ns.OpenOptions("general") end)
+	UI.Tooltip(settingsBtn, function(tt) tt:SetText("Настройки") end)
+	settingsBtn:SetPoint("TOPRIGHT", -10, -35)
 	local miniBtn = UI.FlatButton(frame, "Мини", 54, 22, function()
 		frame:Hide()
 		ns.ShowCompact()

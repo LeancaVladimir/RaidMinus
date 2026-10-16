@@ -40,6 +40,22 @@ end
 function ns.StartRoll(e, only, watchBy, off)
 	if e then ns.FreshLink(e) end
 	if not e then return end
+	if not watchBy then
+		if not ns.CanManageLoot() then
+			ns.Print(ns.NO_LOOT_RIGHTS)
+			return
+		end
+		local busy, busyLink = ns.RollBusyBy(e)
+		if busy then
+			ns.Print(format("%s сейчас разыгрывает %s — дождитесь итога.", busy, busyLink or e.link))
+			return
+		end
+		local by = e.result and (e.result.remote or (e.remote and e.remote.done and e.remote.by))
+		if by then
+			ns.Print(format("%s уже разыграл %s — второй раз не разыгрываем.", by, e.link))
+			return
+		end
+	end
 	if ns.roll and ns.roll.state == "open" then
 		if not ns.roll.watch then
 			ns.Print("уже идёт ролл — сначала закончите его.")
@@ -68,8 +84,20 @@ function ns.StartRoll(e, only, watchBy, off)
 	elseif not watchBy then
 		ns.Announce(format("Ролл %s (%s): /roll, %d сек", e.link, ns.CategoryName(e.cat), duration), true)
 	end
+	if not watchBy then
+		e.remote = nil
+		if ns.SyncRollStart then ns.SyncRollStart(r) end
+	end
 	Tick()
 	ns.Refresh()
+end
+
+-- кто другой сейчас разыгрывает (виден ролл: объявление в чате или синхронизация); nil — никто.
+-- Пока идёт чужой ролл, свой не начать: броски игроков засчитались бы в оба.
+function ns.RollBusyBy(e)
+	local r = ns.roll
+	if r and r.state == "open" and r.watch then return r.watch, r.link end
+	if e.remote and not e.remote.done and e.remote.t and time() - e.remote.t < 180 then return e.remote.by end
 end
 
 -- ролл объявил другой: не мешаем своему роллу, иначе начинаем наблюдение
@@ -183,6 +211,10 @@ end
 function ns.AnnounceResult(e)
 	local res = e and e.result
 	if not res then return end
+	if not ns.CanManageLoot() then
+		ns.Print(ns.NO_LOOT_RIGHTS)
+		return
+	end
 	res.announced = true
 	if res.winner then
 		ns.Announce(format("{rt1} %s — %s (%s)%s", e.link, res.winner, ns.RollText(res), res.off and " — офф-спек" or ""), true)
@@ -205,6 +237,10 @@ function ns.FinishRoll(announce)
 	local r = ns.roll
 	if not r or r.state ~= "open" then return end
 	if announce == nil then announce = not r.watch end
+	if announce and r.watch and not ns.CanManageLoot() then
+		ns.Print(ns.NO_LOOT_RIGHTS)
+		announce = false
+	end
 	ns.Cancel(r.timer)
 	r.state = "done"
 	ns.ComputeRoll(r)
@@ -246,6 +282,7 @@ function ns.FinishRoll(announce)
 		e.result = {entries = CopyEntries(r.entries), none = true, watched = r.watch, off = r.off, t = time()}
 	end
 	if announce then ns.AnnounceResult(e) end
+	if not r.watch and ns.SyncRollEnd then ns.SyncRollEnd(e) end
 	ns.Refresh()
 end
 
@@ -255,6 +292,7 @@ function ns.CancelRoll(silent)
 	if not r then return end
 	ns.Cancel(r.timer)
 	if r.state == "open" and not silent and not r.watch then ns.Announce("Ролл " .. r.link .. " отменён") end
+	if r.state == "open" and not r.watch and ns.SyncRollCancel then ns.SyncRollCancel(r.link) end
 	ns.roll = nil
 	ns.Refresh()
 end

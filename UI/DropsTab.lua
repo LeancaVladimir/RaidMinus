@@ -25,17 +25,19 @@ end
 function ns.DropItemStatus(item)
 	local e = item.loot and ns.LootById(item.loot)
 	if e then
-		if e.winner then return "|cff60e860выиграл|r " .. ns.ColorName(e.winner, ClassOf(e.winner)), "minus" end
+		if e.receiver and e.receiver ~= e.winner then return "|cffff9020получил|r " .. ns.ColorName(e.receiver, ClassOf(e.receiver)), nil end
+		if e.winner then
+			local trade = ns.TradeText(e, true)
+			return "|cff60e860выиграл|r " .. ns.ColorName(e.winner, ClassOf(e.winner)) .. (trade ~= "" and ("  " .. trade) or ""), nil
+		end
 		if ns.roll and ns.roll.loot == e.id and ns.roll.state == "open" then return "|cffffd100ролл...|r", nil end
-		return "|cff60e860в розыгрыше|r", "minus"
+		if e.remote and not e.remote.done then return "|cff69ccf0разыгрывает " .. tostring(e.remote.by) .. "|r", nil end
+		return "|cff60e860в розыгрыше|r  " .. ns.TradeText(e, true), "minus"
 	end
 	if item.wanted then return item.removed and "|cffffd100убран из розыгрыша|r" or "|cffffd100не включено|r", "plus" end
 	return "|cff707070скрыто: " .. tostring(item.why or "фильтр") .. "|r", "plus"
 end
 
-function ns.PageTitle(page)
-	return page.boss and ns.Section(page.boss).name or page.title or "Добыча"
-end
 
 function ns.PageMeta(page)
 	local parts = {date("%H:%M", page.t)}

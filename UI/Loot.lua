@@ -13,8 +13,41 @@ local STAR = "Interface\\TargetingFrame\\UI-RaidTargetingIcon_1"
 local DIAMOND = "Interface\\TargetingFrame\\UI-RaidTargetingIcon_3"
 
 local lootList, rollList, input, removeBtn
-local itemBtn, catText, stateText, startBtn, finishBtn, cancelBtn, chatBtn, testBtn, foreignBtn, offBtn
+local itemBtn, catText, stateText, startBtn, finishBtn, cancelBtn, chatBtn, testBtn, foreignBtn, offBtn, receiverBtn
 local shownWinner, shownTie -- для строк таблицы
+
+-- выиграл один, а получил другой (ролл за друга, случайный бросок): кто фактически получил
+StaticPopupDialogs["RAIDMINUS_RECEIVER"] = {
+	text = "Кто фактически получил %s?\nПусто — получил победитель.",
+	button1 = OKAY,
+	button2 = CANCEL,
+	hasEditBox = 1,
+	maxLetters = 40,
+	OnShow = function(self, e)
+		local edit = _G[self:GetName() .. "EditBox"]
+		edit:SetText(e and e.receiver or "")
+		edit:SetFocus()
+	end,
+	OnAccept = function(self, e) ns.SetReceiverByText(e, _G[self:GetName() .. "EditBox"]:GetText()) end,
+	EditBoxOnEnterPressed = function(self)
+		local dialog = self:GetParent()
+		ns.SetReceiverByText(dialog.data, self:GetText())
+		dialog:Hide()
+	end,
+	EditBoxOnEscapePressed = function(self) self:GetParent():Hide() end,
+	timeout = 0, whileDead = 1, hideOnEscape = 1, preferredIndex = 3,
+}
+
+function ns.SetReceiverByText(e, text)
+	if not e then return end
+	text = strtrim(text or "")
+	if text == "" then
+		ns.SetReceiver(e, nil, "вручную")
+		return
+	end
+	local name = ns.MatchName(text, ns.RosterNames()) or text
+	ns.SetReceiver(e, name, "вручную")
+end
 
 local function SelectedLoot()
 	local e = ns.ui.loot and ns.LootById(ns.ui.loot)
@@ -50,7 +83,7 @@ local function MakeLootRow(row)
 	row.icon:SetPoint("LEFT", 2, 0)
 	row.winner = UI.Text(row, "GameFontHighlightSmall", "RIGHT")
 	row.winner:SetPoint("RIGHT", -4, 0)
-	row.winner:SetWidth(90)
+	row.winner:SetWidth(124)
 	row.name = UI.Text(row, "GameFontHighlightSmall")
 	row.name:SetPoint("LEFT", row.icon, "RIGHT", 4, 0)
 	row.name:SetPoint("RIGHT", row.winner, "LEFT", -4, 0)
@@ -73,25 +106,37 @@ local function MakeLootRow(row)
 		tt:AddLine("Категория: " .. ns.CategoryName(e.cat), 0.6, 0.8, 1)
 		tt:AddLine("Откуда: " .. ns.LootSourceText(e), 0.6, 0.8, 1, true)
 		if e.boss then tt:AddLine("Босс: " .. ns.ShortName(e.boss), 0.6, 0.8, 1) end
+		if e.receiver then
+			tt:AddLine("Получил: " .. e.receiver .. " (" .. tostring(e.receiverBy) .. ")", 1, 0.6, 0.2)
+		elseif e.holder then
+			tt:AddLine("У кого: " .. e.holder, 0.6, 0.8, 1)
+		end
+		local trade = ns.TradeText(e)
+		if trade ~= "" then tt:AddLine(trade .. (select(2, ns.TradeLeft(e)) and "" or " (оценка от убийства)"), 1, 1, 1) end
 	end)
+end
+
+-- справа в строке добычи: идёт ролл / кто получил / победитель / кто разыгрывает / время на передачу
+local function LootStatus(e)
+	local r = ns.roll
+	if r and r.loot == e.id and r.state == "open" then
+		return r.watch and ("|cff69ccf0считаю (" .. tostring(r.watch) .. ")|r") or "|cffffd100ролл...|r"
+	end
+	if e.receiver and e.receiver ~= e.winner then
+		return "|cffff9020получил|r " .. ns.ColorName(e.receiver, ClassOf(e.receiver))
+	end
+	if e.winner then return "|T" .. STAR .. ":12|t " .. ns.ColorName(e.winner, ClassOf(e.winner)) end
+	if e.result and e.result.tie then return "|cffffd100ничья|r" end
+	if e.result then return "|cff9d9d9dникто|r" end
+	if e.remote and not e.remote.done then return "|cff69ccf0разыгрывает " .. tostring(e.remote.by) .. "|r" end
+	return ns.TradeText(e, true)
 end
 
 local function DrawLootRow(row, e)
 	local texture = select(10, GetItemInfo(e.link))
 	row.icon:SetTexture(texture or "Interface\\Icons\\INV_Misc_QuestionMark")
 	row.name:SetText(e.link)
-	local r = ns.roll
-	if r and r.loot == e.id and r.state == "open" then
-		row.winner:SetText(r.watch and "|cff69ccf0считаю...|r" or "|cffffd100ролл...|r")
-	elseif e.winner then
-		row.winner:SetText("|T" .. STAR .. ":12|t " .. ns.ColorName(e.winner, ClassOf(e.winner)))
-	elseif e.result and e.result.tie then
-		row.winner:SetText("|cffffd100ничья|r")
-	elseif e.result then
-		row.winner:SetText("|cff9d9d9dникто|r")
-	else
-		row.winner:SetText("")
-	end
+	row.winner:SetText(LootStatus(e))
 	UI.Select(row, ns.ui.loot == e.id)
 end
 
@@ -266,6 +311,28 @@ local function Create(f)
 	UI.Tooltip(chatBtn, function(tt)
 		tt:SetText("Написать итог этого предмета в рейд ещё раз")
 	end)
+	receiverBtn = UI.Button(f, "Получил другой", 124, function()
+		local e = SelectedLoot()
+		if e then StaticPopup_Show("RAIDMINUS_RECEIVER", e.link, nil, e) end
+	end)
+	receiverBtn:SetPoint("LEFT", chatBtn, "RIGHT", 4, 0)
+	UI.Tooltip(receiverBtn, function(tt)
+		tt:SetText("Кто фактически получил предмет")
+		tt:AddLine("Выиграл один, а забрал другой (ролл за друга, случайный бросок). Видно в истории и у других с RaidMinus. "
+			.. "Сам аддон ставит это по строке «… получает добычу» и по вашему обмену.", 1, 1, 1, true)
+	end)
+	-- кнопки ролла — только у РЛа, помощника и ответственного за добычу; пока идёт чужой ролл — нельзя
+	local function RightsTip(tt, self)
+		tt:SetText(self:GetText())
+		if not ns.CanManageLoot() then
+			tt:AddLine(ns.NO_LOOT_RIGHTS, 1, 0.4, 0.4, true)
+		else
+			local busy, link = ns.RollBusyBy(SelectedLoot() or {})
+			if busy then tt:AddLine(busy .. " сейчас разыгрывает " .. tostring(link) .. " — дождитесь итога.", 1, 0.82, 0, true) end
+		end
+	end
+	UI.Tooltip(startBtn, RightsTip)
+	if startBtn.SetMotionScriptsWhileDisabled then startBtn:SetMotionScriptsWhileDisabled(true) end -- подсказка и у недоступной
 	testBtn = UI.Button(f, "Тест-броски", 100, function() ns.TestRolls() end)
 	testBtn:SetPoint("TOPLEFT", offBtn, "BOTTOMLEFT", 0, -4)
 	foreignBtn = UI.Button(f, "Тест: чужой ролл", 130, function() ns.TestForeignRoll() end)
@@ -288,11 +355,22 @@ local function StateLine(s, e, r, live)
 		return format("|cffffd100%s: %d сек|r · бросили: %d", what, left, #r.entries)
 	end
 	local res = e.result
-	if not res then return "|cff9d9d9dНе разыгран|r" end
+	if not res then
+		if e.remote and not e.remote.done then
+			return "|cff69ccf0Разыгрывает " .. tostring(e.remote.by) .. " — ждите итога|r"
+		end
+		return "|cff9d9d9dНе разыгран|r"
+	end
 	local tail = (res.watched and not res.announced) and " · |cffff9020в чат не писал|r" or ""
+	if res.remote then tail = tail .. " · |cff9d9d9dразыгрывал " .. res.remote .. "|r" end
+	if res.remoteWinner then tail = tail .. " · |cffff9020у " .. tostring(e.remote and e.remote.by) .. " победил " .. res.remoteWinner .. "|r" end
+	if e.receiver and e.receiver ~= res.winner then
+		tail = tail .. " · |cffff9020получил " .. e.receiver .. " (" .. tostring(e.receiverBy) .. ")|r"
+	end
 	if res.winner then
-		return format("Победитель%s: |T%s:14|t %s (%s)%s", res.off and " (офф-спек)" or "", STAR,
-			ns.ColorName(res.winner, ClassOf(res.winner)), ns.RollText(res), tail)
+		local roll = (#res.entries > 0 or res.roll) and (" (" .. ns.RollText(res) .. ")") or ""
+		return format("Победитель%s: |T%s:14|t %s%s%s", res.off and " (офф-спек)" or "", STAR,
+			ns.ColorName(res.winner, ClassOf(res.winner)), roll, tail)
 	end
 	if res.tie then
 		return "|cffffd100Ничья: " .. table.concat(res.tie, ", ") .. "|r — «Переролл ничьей» перекинет только их"
@@ -322,12 +400,13 @@ local function Update()
 		stateText:SetText("")
 		shownWinner, shownTie = nil, nil
 		rollList:Draw({}, DrawRollRow)
-		for _, b in ipairs({startBtn, finishBtn, cancelBtn, chatBtn, offBtn}) do b:Disable() end
+		for _, b in ipairs({startBtn, finishBtn, cancelBtn, chatBtn, offBtn, receiverBtn}) do b:Disable() end
 		return
 	end
 
 	itemBtn.text:SetText(e.link)
-	catText:SetText("Категория: " .. ns.CategoryName(e.cat) .. "  ·  " .. ns.LootSourceText(e))
+	local trade = ns.TradeText(e)
+	catText:SetText("Категория: " .. ns.CategoryName(e.cat) .. "  ·  " .. ns.LootSourceText(e) .. (trade ~= "" and ("  ·  " .. trade) or ""))
 	stateText:SetText(StateLine(s, e, r, live))
 
 	local entries
@@ -347,16 +426,23 @@ local function Update()
 	end
 	rollList:Draw(entries, DrawRollRow)
 
-	local busy = r and r.state == "open" and not r.watch
-	if busy then
+	-- начать нельзя: нет прав, идёт свой ролл, кто-то другой разыгрывает (чат или синхронизация)
+	local rights = ns.CanManageLoot()
+	local busy = (r and r.state == "open" and not r.watch) or ns.RollBusyBy(e)
+	-- разыграл другой (виден его итог) — второй раз тот же предмет не разыгрываем
+	local foreign = e.result and (e.result.remote or (e.remote and e.remote.done and e.remote.by))
+	if busy or not rights or foreign then
 		startBtn:Disable()
 		offBtn:Disable()
 	else
 		startBtn:Enable()
 		offBtn:Enable()
 	end
+	receiverBtn:Enable()
 	if live then
 		startBtn:SetText("Начать ролл")
+	elseif foreign then
+		startBtn:SetText("Разыграл " .. tostring(foreign))
 	elseif e.result and e.result.tie then
 		startBtn:SetText("Переролл ничьей")
 	elseif e.result then
@@ -364,14 +450,9 @@ local function Update()
 	else
 		startBtn:SetText("Начать ролл")
 	end
-	if live then
-		finishBtn:Enable()
-		cancelBtn:Enable()
-	else
-		finishBtn:Disable()
-		cancelBtn:Disable()
-	end
-	if e.result and not live then chatBtn:Enable() else chatBtn:Disable() end
+	if live and rights then finishBtn:Enable() else finishBtn:Disable() end
+	if live then cancelBtn:Enable() else cancelBtn:Disable() end
+	if e.result and not live and rights then chatBtn:Enable() else chatBtn:Disable() end
 end
 
 ns.RegisterPage("loot", Create, Update)

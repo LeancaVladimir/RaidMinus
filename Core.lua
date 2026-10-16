@@ -20,8 +20,8 @@ local DEFAULTS = {
 	rollMax = 100,         -- засчитывается только /roll 1-rollMax
 	rollCountdown = true,  -- «осталось 10 сек»
 	-- добыча (LootList.lua): откуда узнаём, что упало, и что из этого разыгрываем
-	lootFilter = "heroic", -- heroic — гер. снаряжение ЦЛК 25 и всё не ниже lootMinIlvl; epic — все эпики
-	lootMinIlvl = 277,     -- уровень предмета для фильтра heroic (предметы не из таблицы ЦЛК)
+	lootFilter = "boss",   -- boss — снаряжение с боссов ЦЛК любой сложности; heroic — только гер.; epic — все эпики
+	lootMinIlvl = 277,     -- предметы не из таблиц ЦЛК: эпик, надевается, уровень не ниже этого
 	lootQuality = 4,       -- для фильтра epic: от какого качества
 	lootAuto = true,       -- добыча, прошедшая фильтр, сразу попадает в розыгрыш
 	lootPopup = "new",     -- окно «Добыча»: new — при новой добыче, missing — если что-то не в розыгрыше, off — само не открывать
@@ -29,6 +29,9 @@ local DEFAULTS = {
 	srcRaidRoll = true,    -- тело открыл другой с аддоном RaidRoll (скрытый канал RRL)
 	srcChat = true,        -- строки «Вася получает добычу: [предмет]»
 	srcList = true,        -- лидер, ассистент или ответственный за добычу скинул в рейд список ссылок
+	srcSync = true,        -- тело открыл другой игрок с RaidMinus (рассылает добычу сам)
+	sync = true,           -- ролл виден у всех с RaidMinus: кто разыгрывает, итог, кто получил (Sync.lua)
+	tradeWarn = true,      -- предупреждать, когда на передачу предмета остаётся мало времени
 	watchOthers = true,    -- ролл объявил ответственный за добычу — предмет в список, броски считаются с минусами
 	rollLines = 10,        -- сколько строк итога ролла писать в рейд (каждый игрок — отдельной строкой)
 	reloadPrompt = true,   -- после убийства босса предложить /reload, чтобы журнал записался на диск
@@ -126,6 +129,14 @@ function ns.ValueColor(v)
 	if v > 0 then return "|cff40ff40" .. ns.ValueText(v) .. "|r" end
 	if v < 0 then return "|cffff5050" .. ns.ValueText(v) .. "|r" end
 	return "|cff9d9d9d0|r"
+end
+
+-- 6300 -> «1:45», 900 -> «15 мин», 40 -> «40 сек»
+function ns.Duration(sec)
+	sec = math.max(0, math.floor(sec or 0))
+	if sec >= 3600 then return format("%d:%02d", math.floor(sec / 3600), math.floor(sec % 3600 / 60)) end
+	if sec >= 60 then return format("%d мин", math.floor(sec / 60)) end
+	return format("%d сек", sec)
 end
 
 function ns.ClassHex(class)
@@ -241,6 +252,11 @@ ns.On("ADDON_LOADED", function(name)
 	for k, v in pairs(DEFAULTS) do
 		if db.settings[k] == nil then db.settings[k] = v end
 	end
+	-- 0.3.0: «только гер. ЦЛК 25» прятал добычу босса, убитого на обычной сложности (Профа)
+	if not db.settings.v3 then
+		if db.settings.lootFilter == "heroic" then db.settings.lootFilter = "boss" end
+		db.settings.v3 = true
+	end
 	db.rulesets = db.rulesets or {}
 	db.history = db.history or {}
 	db.minimap = db.minimap or {}
@@ -256,7 +272,8 @@ local HELP = {
 	"|cffffd100/rm старт|r — начать рейд, |cffffd100/rm конец|r — завершить",
 	"|cffffd100/rm Имя -20 причина|r — свой минус (или +10 — плюс)",
 	"|cffffd100/rm ролл [предмет]|r — разыграть (shift+клик по предмету), |cffffd100/rm лут [предмет]|r — в список",
-	"|cffffd100/rm правила|r, |cffffd100/rm настройки|r, |cffffd100/rm версия|r",
+	"|cffffd100/rm правила|r, |cffffd100/rm настройки|r, |cffffd100/rm история|r, |cffffd100/rm версия|r",
+	"|cffffd100/rm лог|r — откуда пришла добыча и что отброшено, |cffffd100/rm лог пул|r — пулы боссов и таймер",
 	"|cffffd100/rm тест|r — тестовый рейд (25 выдуманных игроков, в чат ничего не уходит), |cffffd100/rm тест босс|r — убить босса (автоминусы, добыча), |cffffd100/rm тест чужой|r — ролл от ответственного, |cffffd100/rm тест ролл|r — броски",
 	"Клавиши (Esc, «Назначение клавиш», раздел RaidMinus): окно, мини-панель, |cffffd100минус цели|r — меню правил с цифрами 1-9.",
 	"Игроки шепчут вам |cffffd100!минус|r и получают свою сумму.",
@@ -298,6 +315,10 @@ function ns.Command(msg)
 		ns.ShowLootWindow()
 	elseif c == "версия" or c == "version" then
 		ns.VersionInfo()
+	elseif c == "история" or c == "history" then
+		ns.ShowTab("history")
+	elseif c == "лог" or c == "log" then
+		if r == "пул" or r == "pull" then ns.PrintPullLog() else ns.PrintLootLog() end
 	elseif c == "правила" or c == "rules" then
 		ns.ShowTab("rules")
 	elseif c == "настройки" or c == "config" then

@@ -160,6 +160,7 @@ function ns.UpdateRoster()
 	local s = ns.Session()
 	wipe(ns.here)
 	wipe(ns.officers)
+	ns.masterLooter = nil
 	if not s then return end
 	local me = ns.PlayerName()
 	if s.test then
@@ -173,6 +174,7 @@ function ns.UpdateRoster()
 			DetectRole(s.roster[me], "player")
 		end
 		ns.here[me] = 1
+		ns.masterLooter = "Холпал" -- в тестовом рейде ответственный за добычу — Холпал (Test.lua)
 		return
 	end
 	local n = GetNumRaidMembers()
@@ -185,6 +187,7 @@ function ns.UpdateRoster()
 				s.roster[name] = p
 				ns.here[name] = group
 				if (rank or 0) >= 1 or isML then ns.officers[name] = true end
+				if isML then ns.masterLooter = name end
 				DetectRole(p, "raid" .. i)
 			end
 		end
@@ -208,6 +211,25 @@ end
 
 -- в группе ли игрок (для приёма бросков)
 function ns.IsHere(name) return name and ns.here[name] ~= nil end
+
+-- может ли этот игрок разыгрывать добычу: РЛ, помощник или ответственный за добычу
+-- (тестовый рейд и игра без группы — можно, это тренировка)
+function ns.CanManageLoot()
+	local s = ns.Session()
+	if s and s.test then return true end
+	if GetNumRaidMembers() > 0 then
+		if IsRaidLeader() or IsRaidOfficer() then return true end
+		return ns.masterLooter == ns.PlayerName()
+	end
+	if GetNumPartyMembers() > 0 then
+		if IsPartyLeader() then return true end
+		local method, partyMaster = GetLootMethod()
+		return method == "master" and partyMaster == 0
+	end
+	return true
+end
+
+ns.NO_LOOT_RIGHTS = "разыгрывать могут только РЛ, помощник или ответственный за добычу."
 
 -- список для окна: кто в группе (по группам), затем ушедшие, у кого есть записи в журнале
 function ns.RosterList()
@@ -241,6 +263,7 @@ end
 
 ns.On("RAID_ROSTER_UPDATE", function() ns.UpdateRoster() ns.Refresh() end)
 ns.On("PARTY_MEMBERS_CHANGED", function() ns.UpdateRoster() ns.Refresh() end)
+ns.On("PARTY_LOOT_METHOD_CHANGED", function() ns.UpdateRoster() ns.Refresh() end)
 ns.On("PLAYER_ENTERING_WORLD", function() ns.UpdateRoster() ns.Refresh() end)
 
 -------------------------------------------------------------------------------

@@ -33,9 +33,36 @@ local RRL_QUIET = 1.5 -- сек тишины от одного лутера Raid
 local ROLL_WORDS = {"ролл", "ролим", "роллим", "рол ", "кидаем", "кидайте", "roll"}
 local WIN_WORDS = {"выиграл", "победил", "побеждает", "забирает", "won", "wins", "winner"}
 
-ns.SOURCES = {corpse = "тело", rrl = "RaidRoll", chat = "чат лута", list = "список", announce = "объявлен ролл", manual = "вручную", drop = "добыча босса"}
+ns.SOURCES = {corpse = "тело", rrl = "RaidRoll", chat = "чат лута", list = "список", announce = "объявлен ролл", manual = "вручную", drop = "добыча босса", sync = "RaidMinus"}
 
 local function Settings() return ns.DB.settings end
+
+local TRADE_TIME = 7200 -- 2 часа: столько предмет из рейда можно передать тем, кто был в рейде
+local LOG_LIMIT = 80
+
+-- журнал добычи: откуда что пришло и что отброшено (/rm лог) — чтобы разобраться, почему предмет не записался
+function ns.LootLog(src, who, text)
+	local s = ns.Session()
+	if not s then return end
+	s.lootLog = s.lootLog or {}
+	tinsert(s.lootLog, {t = time(), src = src, who = who, text = text})
+	while #s.lootLog > LOG_LIMIT do tremove(s.lootLog, 1) end
+end
+
+function ns.PrintLootLog()
+	local s = ns.Session()
+	local log = s and s.lootLog
+	if not log or #log == 0 then
+		ns.Print("журнал добычи пуст.")
+		return
+	end
+	ns.Print(format("журнал добычи (последние %d):", math.min(#log, 30)))
+	for i = math.max(1, #log - 29), #log do
+		local x = log[i]
+		DEFAULT_CHAT_FRAME:AddMessage(format("  |cff9d9d9d%s|r %s%s: %s", date("%H:%M", x.t), ns.SOURCES[x.src] or x.src,
+			x.who and (" (" .. x.who .. ")") or "", x.text))
+	end
+end
 
 -- шаблон Lua из строки формата клиента: «%s выбрасывает %d (%d-%d)»
 function ns.ToPattern(fmt)
@@ -93,7 +120,7 @@ end
 -- «RaidRoll (Холпал), чат лута»
 function ns.SourceText(src)
 	local parts = {}
-	for _, key in ipairs({"corpse", "rrl", "chat", "list", "drop", "announce", "manual"}) do
+	for _, key in ipairs({"corpse", "sync", "rrl", "chat", "list", "drop", "announce", "manual"}) do
 		local v = src and src[key]
 		if v then
 			if type(v) == "string" then
@@ -183,6 +210,10 @@ function ns.Drops()
 	return s.drops
 end
 
+function ns.PageTitle(page)
+	return page.boss and ns.Section(page.boss).name or page.title or "Добыча"
+end
+
 function ns.DropById(id)
 	for _, page in ipairs(ns.Drops()) do
 		if page.id == id then return page end
@@ -233,7 +264,8 @@ end
 local function NewPage(boss, title)
 	local s = ns.Session()
 	s.nextDrop = (s.nextDrop or 0) + 1
-	local page = {id = s.nextDrop, boss = boss, title = title, t = time(), src = {}, items = {}, tallies = {}}
+	local kill = s.lastKill and s.lastKill.boss == boss and s.lastKill.t or time()
+	local page = {id = s.nextDrop, boss = boss, title = title, t = time(), kill = kill, src = {}, items = {}, tallies = {}}
 	tinsert(ns.Drops(), page)
 	return page
 end
@@ -342,12 +374,87 @@ function ns.ReportLoot(kind, by, mob, items)
 			Sync(page, x, opened)
 		end
 	end
+	local wanted, inRoll, _, hidden = ns.DropCounts(page)
+	ns.LootLog(kind, by, format("%s: %d предм. → «%s»%s, важных %d, в розыгрыше %d, скрыто %d", tostring(mob or "?"),
+		#items, ns.PageTitle(page), opened.added and "" or " (без новых)", wanted, inRoll, hidden))
 	if opened.added then
 		page.t = time()
 		Popup(page)
 	end
 	ns.Refresh()
 	return page
+end
+
+-- записи розыгрыша с этим предметом
+function ns.LootByItem(id)
+	local s = ns.Session()
+	local out = {}
+	for _, e in ipairs(s and s.loot or {}) do
+		if e.item == id then tinsert(out, e) end
+	end
+	return out
+end
+
+-- кто фактически получил предмет (выиграл один, а забрал другой — ролл за друга, случайный бросок).
+-- how — откуда известно: «вручную», «чат лута», «обмен»; name = nil — сбросить
+function ns.SetReceiver(e, name, how, note)
+	if not e then return end
+	e.receiver = name
+	e.receiverBy = name and how or nil
+	e.receiverNote = name and note or nil
+	if name and e.winner and e.winner ~= name then
+		ns.Print(format("%s: выиграл %s, получил %s (%s).", e.link, e.winner, name, how or "?"))
+	end
+	if how == "вручную" and ns.SyncAward then ns.SyncAward(e) end
+	ns.Refresh()
+end
+
+-- предмет попал к игроку (чат лута, обмен): запись, где он победитель, иначе разыгранная, иначе любая
+function ns.AutoReceiver(id, name, how)
+	local best, rolled, any
+	for _, e in ipairs(ns.LootByItem(id)) do
+		if not e.receiver then
+			if e.winner == name and not best then best = e end
+			if e.result and not rolled then rolled = e end
+			if not any then any = e end
+		end
+	end
+	local e = best or rolled or any
+	if e then ns.SetReceiver(e, name, how) end
+	return e
+end
+
+-- время на передачу: точное (из сумки, от лутера) или оценка от времени убийства
+function ns.TradeExpires(e)
+	if e.expires then return e.expires, e.exact end
+	local page = e.drop and ns.DropById(e.drop)
+	if page then
+		for _, item in ipairs(page.items) do
+			if item.loot == e.id and item.expires then return item.expires, item.exact end
+		end
+		return (page.kill or page.t) + TRADE_TIME, false
+	end
+	return (e.t or time()) + TRADE_TIME, false
+end
+
+-- кто взял предмет из тела: ответственный (держит у себя — пошли 2 часа на передачу) или игрок (получил)
+local function MarkLooted(page, id, looter)
+	local item
+	for _, it in ipairs(page.items) do
+		if it.id == id and not it.looted then item = it break end
+	end
+	if item then item.looted = looter end
+	local holder = not looter or looter == ns.masterLooter
+	if holder then
+		if item and not item.exact then item.expires = time() + TRADE_TIME end
+		local e = item and item.loot and ns.LootById(item.loot)
+		if e then
+			e.holder = looter
+			if not e.exact then e.expires = item.expires end
+		end
+		return
+	end
+	ns.AutoReceiver(id, looter, "чат лута")
 end
 
 -- строка чата лута: один предмет. Сначала — страница, где этот предмет уже известен от другого
@@ -378,6 +485,8 @@ local function ChatLoot(looter, link, count)
 	target.src.chat = looter or true
 	local opened = {}
 	Sync(target, info, opened)
+	MarkLooted(target, id, looter)
+	ns.LootLog("chat", looter, format("%s → «%s»%s", link, ns.PageTitle(target), opened.added and " (новый)" or ""))
 	if opened.added then
 		target.t = time()
 		Popup(target)
@@ -437,6 +546,8 @@ ns.On("LOOT_OPENED", function()
 	if #items == 0 then return end
 	local mob = UnitExists("target") and UnitIsDead("target") and UnitName("target") or nil
 	ns.ReportLoot("corpse", ns.PlayerName(), mob, items)
+	-- другим РЛам и помощникам с RaidMinus: что лежит в теле (один раз на тело)
+	if ns.SyncLoot then ns.SyncLoot(mob, items, UnitExists("target") and UnitGUID("target")) end
 end)
 
 -------------------------------------------------------------------------------
@@ -491,13 +602,16 @@ end
 
 -- сообщение в рейд или группу (тестовый рейд вызывает напрямую — «ответственный объявил ролл»)
 function ns.OnGroupMessage(msg, sender)
-	if not ns.Session() then return end
-	if sender == ns.PlayerName() or not ns.officers[sender] then return end
+	if not ns.Session() or sender == ns.PlayerName() then return end
 	local links = {}
 	for link in msg:gmatch(LINK) do
 		if (ns.LinkQuality(link) or 0) >= 4 then tinsert(links, link) end
 	end
 	if #links == 0 then return end
+	if not ns.officers[sender] then
+		ns.LootLog("list", sender, format("%d ссылок — пропущено: не РЛ, не помощник и не ответственный за добычу", #links))
+		return
+	end
 	local text = ns.Lower((msg:gsub(LINK, " ")))
 
 	if HasWord(text, WIN_WORDS) then
@@ -516,9 +630,15 @@ function ns.OnGroupMessage(msg, sender)
 
 	if #links == 1 and HasWord(text, ROLL_WORDS) then
 		if not Settings().watchOthers then return end
+		local r = ns.roll
+		if r and r.state == "open" and ns.ItemId(r.link) == ns.ItemId(links[1]) then return end -- уже считаю (синхронизация)
 		local e = ns.AddLoot(links[1], "announce", sender)
+		ns.LootLog("announce", sender, links[1] .. " — ролл, считаю броски")
 		if e then ns.WatchRoll(e, sender) end
 		return
+	end
+	if #links == 1 then
+		ns.LootLog("list", sender, links[1] .. " — нет слова «ролл», не засчитано как ролл")
 	end
 
 	if #links >= 2 and Settings().srcList then
