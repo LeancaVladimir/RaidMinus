@@ -117,6 +117,7 @@ local function OnRollStart(link, sec, flags, sender)
 	if now and now.loot == e.id then
 		now.ends = GetTime() + (tonumber(sec) or 30) + 5
 		now.synced = true
+		ns.NotifyWatch(e, sender)
 	end
 end
 

@@ -328,7 +328,15 @@ function ns.BossKilled(key)
 	ns.After(8, ReloadPrompt)
 end
 
-local function OnPull(_, mod) ns.BossPulled(mod and ns.BossByDBM(mod.id)) end
+-- пул босса ЦЛК в рейде, а «рейд» не начат — начать самим (иначе ни минусов, ни добычи)
+local function OnPull(_, mod)
+	local key = mod and ns.BossByDBM(mod.id)
+	if key and not ns.Session() and ns.DB.settings.autoSession and GetNumRaidMembers() > 0 then
+		ns.StartSession()
+		ns.Print("рейд начат сам: пул босса " .. ns.ShortName(key) .. ". Закончить — «Завершить рейд».")
+	end
+	ns.BossPulled(key)
+end
 local function OnKill(_, mod) ns.BossKilled(mod and ns.BossByDBM(mod.id)) end
 
 function ns.BossWiped(key)

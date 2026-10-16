@@ -617,15 +617,26 @@ end
 --   несколько ссылок — список добычи.
 -- Свои сообщения РЛа тоже считаются (он мог кинуть ссылку руками), кроме того, что написал сам аддон.
 function ns.OnGroupMessage(msg, sender, event)
-	if not ns.Session() then return end
 	local me = sender == ns.PlayerName()
 	if me and (ns.SentByAddon(msg) or msg:find("{rt", 1, true)) then return end -- это написал аддон
-	local links = {}
+	-- ссылки: эпики — добыча и ролл сразу; синие и зелёные — ролл, только если пошли броски
+	local links, epic = {}, 0
 	for link in msg:gmatch(LINK) do
-		if (ns.LinkQuality(link) or 0) >= 4 then tinsert(links, link) end
+		local q = ns.LinkQuality(link) or 0
+		if q >= 2 then
+			tinsert(links, link)
+			if q >= 4 then epic = epic + 1 end
+		end
 	end
 	if #links == 0 then return end
-	if not me and not ns.officers[sender] then
+	local warning = event == "CHAT_MSG_RAID_WARNING" -- объявление рейду пишут только РЛ и помощники
+	if not ns.Session() then
+		-- рейд не начат, а в объявлении рейду разыгрывают — начать самим, иначе ролл пропадёт
+		if not (Settings().autoSession and warning and #links == 1 and GetNumRaidMembers() > 0) then return end
+		ns.StartSession()
+		ns.Print("рейд начат сам: в объявлении рейду разыгрывают " .. links[1] .. ". Закончить — «Завершить рейд».")
+	end
+	if not me and not ns.officers[sender] and not warning then
 		ns.LootLog("list", sender, format("%d ссылок — пропущено: не РЛ, не помощник и не ответственный за добычу", #links))
 		return
 	end
@@ -649,7 +660,7 @@ function ns.OnGroupMessage(msg, sender, event)
 		local link = links[1]
 		local r = ns.roll
 		if r and r.state == "open" and ns.ItemId(r.link) == ns.ItemId(link) then return end -- уже считаю
-		if event == "CHAT_MSG_RAID_WARNING" or HasWord(text, ROLL_WORDS) then
+		if epic == 1 and (warning or HasWord(text, ROLL_WORDS)) then
 			if not Settings().watchOthers then return end
 			ns.lastLinked = nil
 			local e = ns.AddLoot(link, "announce", sender)
@@ -663,9 +674,11 @@ function ns.OnGroupMessage(msg, sender, event)
 		return
 	end
 
-	if Settings().srcList then
+	if Settings().srcList and epic >= 2 then
 		local items = {}
-		for _, link in ipairs(links) do tinsert(items, {id = ns.ItemId(link), link = link}) end
+		for _, link in ipairs(links) do
+			if (ns.LinkQuality(link) or 0) >= 4 then tinsert(items, {id = ns.ItemId(link), link = link}) end
+		end
 		ns.ReportLoot("list", sender, nil, items)
 	end
 end

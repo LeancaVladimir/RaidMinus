@@ -105,6 +105,18 @@ function ns.WatchRoll(e, by)
 	local r = ns.roll
 	if r and r.state == "open" and not r.watch then return end
 	ns.StartRoll(e, nil, by)
+	ns.NotifyWatch(e, by)
+end
+
+-- чужой ролл пошёл: сказать РЛу и показать «Розыгрыш» с этим предметом (иначе подсчёт идёт незаметно)
+function ns.NotifyWatch(e, by)
+	local r = ns.roll
+	if not r or r.state ~= "open" or r.loot ~= e.id then return end
+	ns.Print(format("идёт ролл %s (объявил %s) — считаю броски с минусами. Итог в чат — «Закончить розыгрыш».", e.link, tostring(by)))
+	if Settings().rollPopup and not InCombatLockdown() and ns.ShowTab then
+		ns.ui.loot = e.id
+		ns.ShowTab("loot")
+	end
 end
 
 function ns.OnRoll(name, roll, low, high)
