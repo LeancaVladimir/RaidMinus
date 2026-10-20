@@ -1,7 +1,7 @@
 -- Тестовый рейд (/rm тест): прогнать всё до настоящего рейда, ничего не отправляя в чат.
---   «Тест: босс» — пул и убийство следующего босса ЦЛК; автоправила этого босса «ловят» игроков
---     (во вкладку «На проверку» или сразу минусом — как настроено у правила), шёпот !минус
---     от пойманного, добыча как будто тело открыл ответственный с RaidRoll (фильтр, окно «Добыча»).
+--   «Тест: босс» — пул и убийство следующего босса ЦЛК; включённые триггеры его правил (и иногда
+--     «Общих») «ловят» подходящих выдуманных игроков — с условиями правила, шёпот !минус от пойманного;
+--     ответственный Холпал берёт добычу в сумку (вкладка «Розыгрыш», кнопка «Ролл»).
 --   «Тест: чужой ролл» — ответственный за добычу (Холпал) объявляет ролл, выдуманные игроки бросают.
 -- Всё, что ушло бы в чат, печатается у вас с пометкой (тест) [Рейд] / [Объявление рейду] / [Шёпот].
 
@@ -68,93 +68,34 @@ local function NextBoss(s)
 	return keys[s.testBoss]
 end
 
--- кого может «поймать» автоправило (по роли и классу)
-local PICK = {
-	mg_cleave = function(p) return p.role ~= "tank" end,
-	ld_mc_weapon = function(p) return p.role == "melee" or p.class == "HUNTER" end,
-	sf_dps = function(p) return p.role == "melee" or p.role == "caster" end,
-	sg_breath = function(p) return p.role ~= "tank" end,
-	rf_vilegas = function(p) return p.role == "caster" or p.role == "healer" end,
-	sunder = function(p) return p.class == "WARRIOR" and p.role ~= "tank" end,
-}
-
-local function Candidates(dkey)
-	local s = ns.Session()
-	local out = {}
-	for _, name in ipairs(TestPlayers()) do
-		local p = s.roster[name]
-		if p and (not PICK[dkey] or PICK[dkey](p)) then tinsert(out, name) end
-	end
-	return out
-end
-
-local function TestDetail(dkey, rule)
-	if dkey == "sf_dps" then
-		local need = ns.RuleParam(rule, "dps")
-		return format("тест: ДПС %d < %d (Skada)", need - random(300, 3000), need)
-	end
-	if dkey == "pp_bonus" then return "тест: в Профа 2,7М, в слизней 0,7М (Skada)" end
-	return "тест: " .. ns.RuleText(rule)
-end
-
 function ns.TestBoss()
 	local s = TestSession()
 	if not s then return end
 	local key = NextBoss(s)
 	local sec = ns.Section(key)
 	ns.BossPulled(key)
-
-	-- автоматика: правила этого босса (и иногда общие — пул, раскол) «ловят» случайных игроков
-	local rs = ns.ActiveRuleset()
-	local victims, instant = {}, 0
-	for _, d in ipairs(ns.DETECTORS) do
-		if d.boss == key or (d.boss == "general" and random() < 0.5) then
-			local rule = ns.AutoRule(rs, d.key)
-			if rule and not rule.off then
-				for _, name in ipairs(Pick(Candidates(d.key), d.key == "sf_dps" and 3 or 1)) do
-					ns.Detected(d.key, name, TestDetail(d.key, rule))
-					tinsert(victims, name)
-					if rule.instant then instant = instant + 1 end
-				end
-			end
-		end
-	end
+	local before = #s.events
+	local caught = ns.TestTriggers(key)
 	ns.BossKilled(key)
 
-	-- через 15 сек кто-то из пойманных спрашивает свои минусы (успейте принять находки)
+	-- через 15 сек кто-то из пойманных спрашивает свои минусы
+	local victims = {}
+	for i = before + 1, #s.events do tinsert(victims, s.events[i].player) end
 	if #victims > 0 then
 		ns.After(15, function()
 			local now = ns.Session()
 			if not now or not now.test then return end -- тестовый рейд могли уже закрыть
-			local who = victims[1]
-			for _, name in ipairs(victims) do
-				if #ns.PlayerEvents(name) > 0 then who = name break end
-			end
-			ns.HandleWhisper("!минус", who)
+			ns.HandleWhisper("!минус", victims[1])
 		end)
 	end
 
-	-- добыча: тело открыл Холпал с аддоном RaidRoll (рассылка по каналу RRL), саронит фильтр скроет;
-	-- через 3 сек Холпал забирает два предмета себе — строки чата лута не должны их задвоить
-	local ids = Pick(TEST_LOOT[key] or {}, random(3, 4))
+	-- добыча: ответственный Холпал берёт три предмета в сумку (саронит — мусор, не записывается)
+	local ids = Pick(TEST_LOOT[key] or {}, 3)
 	tinsert(ids, SARONITE)
-	for _, id in ipairs(ids) do
-		local name = GetItemInfo(id) or ("Предмет " .. id)
-		ns.OnRaidRollMessage(format("Beta_2\a%s\a%s\a%d\a%s\a277", LOOT_MASTER, sec.name, id, name), "RAID", LOOT_MASTER)
-	end
-	ns.After(3, function()
-		local now = ns.Session()
-		if not now or not now.test then return end
-		for i = 1, 2 do
-			if ids[i] then ns.OnLootMessage(format(LOOT_ITEM, LOOT_MASTER, ItemLink(ids[i]))) end
-		end
-	end)
+	for _, id in ipairs(ids) do ns.OnLootMessage(format(LOOT_ITEM, LOOT_MASTER, ItemLink(id))) end
 
-	ns.Print(format("тест: %s убит. Автоматика: находок %d (сразу минусом %d, на проверку %d). Добыча — в окне «Добыча» (тело открыл Холпал с RaidRoll).",
-		sec.name, #victims, instant, #victims - instant))
-	if key == "saurfang" then
-		ns.Print("тест: Холпал — хил, переодетый в ДД: планка ДПС его не касается.")
-	end
+	ns.Print(format("тест: %s убит. Триггеры поймали: %d%s. Холпал взял в сумку %d предм. — вкладка «Розыгрыш», кнопка «Ролл».",
+		sec.name, caught, caught == 0 and " (включите триггеры правил этого босса во вкладке «Правила»)" or "", #ids - 1))
 end
 
 -- ответственный за добычу объявляет ролл предмета из списка (или с последнего босса)

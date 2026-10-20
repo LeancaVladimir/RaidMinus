@@ -1,6 +1,7 @@
--- Вкладка «Розыгрыш»: слева добыча (сама собирается со всех боссов — см. LootList.lua — плюс то,
--- что объявил в ролл ответственный за добычу; вручную — shift+клик в поле или перетащить предмет),
--- справа ролл выбранного предмета: роль, бросок, минусы, итог, допуск; победитель — со звездой.
+-- Вкладка «Розыгрыш»: слева добыча — что РЛ, помощник или ответственный взяли в сумку, и что разыграли
+-- объявлением рейду (LootList.lua); вручную — shift+клик в поле или перетащить предмет. У неразыгранного
+-- предмета в строке кнопка «Ролл». Справа ролл выбранного предмета: роль, бросок, минусы, итог;
+-- победитель — со звездой.
 
 local _, ns = ...
 local UI = ns.UI
@@ -110,11 +111,34 @@ end
 -------------------------------------------------------------------------------
 -- строки
 
+-- можно ли сейчас начать ролл этого предмета (права, не идёт другой ролл, не разыграл другой)
+local function CanStart(e)
+	if not e or not ns.CanManageLoot() then return false end
+	local r = ns.roll
+	if (r and r.state == "open" and not r.watch) or ns.RollBusyBy(e) then return false end
+	return not (e.result and (e.result.remote or (e.remote and e.remote.done and e.remote.by)))
+end
+
+local function StartFor(e)
+	if not e then return end
+	ns.ui.loot = e.id
+	if e.result and e.result.tie then ns.StartRoll(e, e.result.tie) else ns.StartRoll(e) end
+end
+
 local function MakeLootRow(row)
 	row.icon = row:CreateTexture(nil, "ARTWORK")
 	row.icon:SetWidth(18)
 	row.icon:SetHeight(18)
 	row.icon:SetPoint("LEFT", 2, 0)
+	-- «Ролл» — сразу начать ролл этого предмета (объявление рейду)
+	row.roll = UI.FlatButton(row, "Ролл", 40, 18, function(self) StartFor(self:GetParent().item) end, "ghost")
+	row.roll:SetPoint("RIGHT", -2, 0)
+	row.roll.tooltip = function(tt, self)
+		local e = self:GetParent().item
+		if not e then return false end
+		tt:SetText("Ролл " .. e.link)
+		tt:AddLine("Объявить в рейд и считать броски с минусами.", 1, 1, 1, true)
+	end
 	row.winner = UI.Text(row, "GameFontHighlightSmall", "RIGHT")
 	row.winner:SetPoint("RIGHT", -4, 0)
 	row.winner:SetWidth(124)
@@ -143,10 +167,10 @@ local function MakeLootRow(row)
 		if e.receiver then
 			tt:AddLine("Получил: " .. e.receiver .. " (" .. tostring(e.receiverBy) .. ")", 1, 0.6, 0.2)
 		elseif e.holder then
-			tt:AddLine("У кого: " .. e.holder, 0.6, 0.8, 1)
+			tt:AddLine("В сумке у: " .. e.holder, 0.6, 0.8, 1)
 		end
 		local trade = ns.TradeText(e)
-		if trade ~= "" then tt:AddLine(trade .. (select(2, ns.TradeLeft(e)) and "" or " (оценка от убийства)"), 1, 1, 1) end
+		if trade ~= "" then tt:AddLine(trade .. (select(2, ns.TradeLeft(e)) and "" or " (оценка)"), 1, 1, 1) end
 	end)
 end
 
@@ -170,6 +194,19 @@ local function DrawLootRow(row, e)
 	local texture = select(10, GetItemInfo(e.link))
 	row.icon:SetTexture(texture or "Interface\\Icons\\INV_Misc_QuestionMark")
 	row.name:SetText(e.link)
+	-- «Ролл» — у неразыгранного (или ничьей), когда начать можно; время на передачу — левее кнопки
+	local r = ns.roll
+	local live = r and r.loot == e.id and r.state == "open"
+	if not live and not e.receiver and (not e.result or e.result.tie) and CanStart(e) then
+		row.roll:SetLabel(e.result and "Ещё" or "Ролл")
+		row.roll:Show()
+		row.winner:SetPoint("RIGHT", -46, 0)
+		row.winner:SetWidth(84)
+	else
+		row.roll:Hide()
+		row.winner:SetPoint("RIGHT", -4, 0)
+		row.winner:SetWidth(124)
+	end
 	row.winner:SetText(LootStatus(e))
 	UI.Select(row, ns.ui.loot == e.id)
 end
@@ -330,11 +367,7 @@ local function Create(f)
 		fs:SetText(c[2])
 	end
 
-	startBtn = UI.Button(f, "Начать ролл", 120, function()
-		local e = SelectedLoot()
-		if not e then return end
-		if e.result and e.result.tie then ns.StartRoll(e, e.result.tie) else ns.StartRoll(e) end
-	end)
+	startBtn = UI.Button(f, "Начать ролл", 120, function() StartFor(SelectedLoot()) end)
 	startBtn:SetPoint("TOPLEFT", rollList, "BOTTOMLEFT", 0, -6)
 	finishBtn = UI.Button(f, "Закончить розыгрыш", 180, FinishOrGive)
 	finishBtn:SetPoint("LEFT", startBtn, "RIGHT", 4, 0)
@@ -445,7 +478,8 @@ local function Update()
 
 	if not e then
 		itemBtn.text:SetText("|cff9d9d9dВыберите предмет слева|r")
-		catText:SetText("Сюда сама попадает важная добыча с боссов (кто бы ни открыл тело), предмет, ролл которого объявил ответственный, и добавленное вручную.")
+		catText:SetText("Сюда сам попадает предмет, который РЛ, помощник или ответственный взяли в сумку (2 часа на передачу), "
+			.. "и предмет, ролл которого объявили рейду. Вручную — shift+клик в поле слева или перетащить предмет.")
 		stateText:SetText("")
 		shownWinner, shownTie = nil, nil
 		rollList:Draw({}, DrawRollRow)

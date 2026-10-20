@@ -19,18 +19,7 @@ local DEFAULTS = {
 	tieTime = 15,          -- секунд на переролл ничьей
 	rollMax = 100,         -- засчитывается только /roll 1-rollMax
 	rollCountdown = true,  -- «осталось 10 сек»
-	-- добыча (LootList.lua): откуда узнаём, что упало, и что из этого разыгрываем
-	lootFilter = "boss",   -- boss — снаряжение с боссов ЦЛК любой сложности; heroic — только гер.; epic — все эпики
-	lootMinIlvl = 277,     -- предметы не из таблиц ЦЛК: эпик, надевается, уровень не ниже этого
-	lootQuality = 4,       -- для фильтра epic: от какого качества
-	lootAuto = true,       -- добыча, прошедшая фильтр, сразу попадает в розыгрыш
-	lootPopup = "new",     -- окно «Добыча»: new — при новой добыче, missing — если что-то не в розыгрыше, off — само не открывать
-	srcCorpse = true,      -- открыл тело сам
-	srcRaidRoll = true,    -- тело открыл другой с аддоном RaidRoll (скрытый канал RRL)
-	srcChat = true,        -- строки «Вася получает добычу: [предмет]»
-	srcList = true,        -- лидер, ассистент или ответственный за добычу скинул в рейд список ссылок
-	srcSync = true,        -- тело открыл другой игрок с RaidMinus (рассылает добычу сам)
-	sync = true,           -- ролл виден у всех с RaidMinus: кто разыгрывает, итог, кто получил (Sync.lua)
+	sync = true,         -- ролл виден у всех с RaidMinus: кто разыгрывает, итог, кто получил (Sync.lua)
 	tradeWarn = true,      -- предупреждать, когда на передачу предмета остаётся мало времени
 	watchOthers = true,    -- ролл объявил ответственный за добычу — предмет в список, броски считаются с минусами
 	rollPopup = true,      -- начался ролл (свой или чужой) — открыть окно на «Розыгрыше» с этим предметом
@@ -39,6 +28,9 @@ local DEFAULTS = {
 	compactAuto = false,   -- мини-панель сама появляется на пуле босса, если окно закрыто
 	versionCheck = true,   -- узнавать о новой версии от других игроков с RaidMinus (рейд, гильдия)
 }
+-- настройки до 0.4.0: фильтр добычи и её источники (тело, RaidRoll, списки) — больше не нужны
+local OLD_SETTINGS = {"lootFilter", "lootMinIlvl", "lootQuality", "lootAuto", "lootPopup",
+	"srcCorpse", "srcRaidRoll", "srcChat", "srcList", "srcSync", "v3"}
 ns.RELEASES = "github.com/LeancaVladimir/RaidMinus/releases"
 ns.HISTORY = 20 -- сколько прошлых рейдов хранить
 
@@ -118,6 +110,21 @@ function ns.MatchName(query, names)
 	end
 	if count == 1 then return found end
 end
+
+-- 2500000 -> «2,5М», 650000 -> «0,65М», 17000 -> «17к»
+function ns.ShortNumber(n)
+	n = tonumber(n) or 0
+	if n >= 1000000 then
+		return (format("%.2f", n / 1000000):gsub("0+$", ""):gsub("%.$", ""):gsub("%.", ",")) .. "М"
+	end
+	if n >= 1000 then
+		return (format("%.1f", n / 1000):gsub("%.0$", ""):gsub("%.", ",")) .. "к"
+	end
+	return tostring(n)
+end
+
+-- правила изменились: триггеры боя пересоберутся (Triggers.lua заменяет эту заглушку)
+function ns.TriggersDirty() end
 
 function ns.ValueText(v)
 	v = v or 0
@@ -267,11 +274,9 @@ ns.On("ADDON_LOADED", function(name)
 	for k, v in pairs(DEFAULTS) do
 		if db.settings[k] == nil then db.settings[k] = v end
 	end
-	-- 0.3.0: «только гер. ЦЛК 25» прятал добычу босса, убитого на обычной сложности (Профа)
-	if not db.settings.v3 then
-		if db.settings.lootFilter == "heroic" then db.settings.lootFilter = "boss" end
-		db.settings.v3 = true
-	end
+	for _, k in ipairs(OLD_SETTINGS) do db.settings[k] = nil end
+	-- текущий рейд 0.3.0: страницы добычи по боссам и очередь «На проверку» больше не нужны
+	if db.session then db.session.drops, db.session.queue, db.session.rejected = nil, nil, nil end
 	db.rulesets = db.rulesets or {}
 	db.history = db.history or {}
 	db.minimap = db.minimap or {}
@@ -283,13 +288,13 @@ end)
 -- слеш-команды
 
 local HELP = {
-	"|cffffd100/rm|r — окно, |cffffd100/rm мини|r — мини-панель, |cffffd100/rm добыча|r — окно добычи",
+	"|cffffd100/rm|r — окно, |cffffd100/rm мини|r — мини-панель, |cffffd100/rm добыча|r — вкладка «Розыгрыш»",
 	"|cffffd100/rm старт|r — начать рейд, |cffffd100/rm конец|r — завершить",
 	"|cffffd100/rm Имя -20 причина|r — свой минус (или +10 — плюс)",
 	"|cffffd100/rm ролл [предмет]|r — разыграть (shift+клик по предмету), |cffffd100/rm лут [предмет]|r — в список",
 	"|cffffd100/rm правила|r, |cffffd100/rm настройки|r, |cffffd100/rm история|r, |cffffd100/rm версия|r",
-	"|cffffd100/rm лог|r — откуда пришла добыча и что отброшено, |cffffd100/rm лог пул|r — пулы боссов и таймер",
-	"|cffffd100/rm тест|r — тестовый рейд (25 выдуманных игроков, в чат ничего не уходит), |cffffd100/rm тест босс|r — убить босса (автоминусы, добыча), |cffffd100/rm тест чужой|r — ролл от ответственного, |cffffd100/rm тест ролл|r — броски",
+	"|cffffd100/rm лог|r — откуда пришла добыча и что пропущено, |cffffd100/rm лог пул|r — пулы боссов и таймер",
+	"|cffffd100/rm тест|r — тестовый рейд (25 выдуманных игроков, в чат ничего не уходит), |cffffd100/rm тест босс|r — убить босса (триггеры, добыча в сумку), |cffffd100/rm тест чужой|r — ролл от ответственного, |cffffd100/rm тест ролл|r — броски",
 	"Клавиши (Esc, «Назначение клавиш», раздел RaidMinus): окно, мини-панель, |cffffd100минус цели|r — меню правил с цифрами 1-9.",
 	"Игроки шепчут вам |cffffd100!минус|r и получают свою сумму.",
 }
@@ -326,8 +331,8 @@ function ns.Command(msg)
 		ns.AddLootFromText(rest, false)
 	elseif c == "мини" or c == "mini" then
 		ns.ToggleCompact()
-	elseif c == "добыча" or c == "drops" then
-		ns.ShowLootWindow()
+	elseif c == "добыча" or c == "drops" or c == "розыгрыш" then
+		ns.ShowTab("loot")
 	elseif c == "версия" or c == "version" then
 		ns.VersionInfo()
 	elseif c == "история" or c == "history" then

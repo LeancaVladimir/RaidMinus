@@ -1,7 +1,7 @@
 -- Главное окно (вариант A, «пульт РЛа»): заголовок со статусом рейда, вкладки, лента последнего
 -- действия с «Отменить»; кнопка у миникарты. Вкладки регистрируются через ns.RegisterPage:
--- UI\Players.lua (Минусы), UI\Log.lua, UI\Loot.lua (Розыгрыш), UI\DropsTab.lua (Добыча),
--- UI\Queue.lua (На проверку), UI\RulesTab.lua (Правила — работает и без рейда).
+-- UI\Players.lua (Минусы), UI\Log.lua, UI\Loot.lua (Розыгрыш), UI\RulesTab.lua (Правила — работает
+-- и без рейда), UI\History.lua.
 
 local _, ns = ...
 local UI = ns.UI
@@ -13,8 +13,6 @@ local TABS = {
 	{key = "players", name = "Минусы", w = 78},
 	{key = "log", name = "Журнал", w = 72},
 	{key = "loot", name = "Розыгрыш", w = 86},
-	{key = "drops", name = "Добыча", w = 80},
-	{key = "queue", name = "Проверка", w = 82},
 	{key = "rules", name = "Правила", w = 76, noSession = true},
 	{key = "history", name = "История", w = 78, noSession = true},
 }
@@ -54,12 +52,10 @@ local function StatusText()
 	return tconcat(parts, "  ·  ")
 end
 
+-- у «Розыгрыша» — сколько предметов ещё не разыграно
 local function TabLabel(tab)
-	if tab.key == "queue" then
-		local n = #ns.QueueList()
-		if n > 0 then return format("%s |cffff6060%d|r", tab.name, n) end
-	elseif tab.key == "drops" and ns.Session() then
-		local n = ns.MissingTotal()
+	if tab.key == "loot" and ns.Session() then
+		local n = ns.UnrolledCount()
 		if n > 0 then return format("%s |cffffd100%d|r", tab.name, n) end
 	end
 	return tab.name
@@ -75,7 +71,6 @@ end
 
 function ns.RefreshUI()
 	if ns.RefreshCompact then ns.RefreshCompact() end
-	if ns.RefreshLootWindow then ns.RefreshLootWindow() end
 	if not frame or not frame:IsShown() then return end
 	local s = ns.Session()
 	status:SetText(StatusText())
@@ -138,7 +133,7 @@ function ns.OnEventsAdded(made)
 	local names = {}
 	for _, ev in ipairs(made) do names[#names + 1] = ev.player end
 	local ev = made[1]
-	local mode = ev.ann or ns.DB.settings.announce
+	local mode = ns.DB.settings.announce
 	local when = mode == "off" and "без объявления" or (mode == "instant" and "объявлю сразу" or "объявлю после боя")
 	ns.ui.feed = format("Поставлено: %s %s (%s) · |cff9d9d9d%s|r", tconcat(names, ", "), ns.ValueColor(ev.value),
 		ns.EventChat(ev), when)
@@ -223,7 +218,8 @@ local function CreateWindow()
 	testBossBtn:SetPoint("RIGHT", endBtn, "LEFT", -4, 0)
 	UI.Tooltip(testBossBtn, function(tt)
 		tt:SetText("Тест: убить следующего босса")
-		tt:AddLine("Пул и убийство босса, «автоминусы» по его правилам, шёпот !минус от наказанного и добыча — как будто тело открыл ответственный с RaidRoll. В чат ничего не уходит.", 1, 1, 1, true)
+		tt:AddLine("Пул и убийство босса, включённые триггеры его правил «ловят» выдуманных игроков, шёпот !минус от наказанного, "
+			.. "ответственный Холпал берёт добычу в сумку. В чат ничего не уходит.", 1, 1, 1, true)
 	end)
 
 	content = CreateFrame("Frame", nil, frame)
@@ -311,8 +307,8 @@ ns.OnLoad(function()
 					if ev.status ~= "cancelled" then active = active + 1 end
 				end
 				tt:AddLine(format("%s: записей %d, добычи в розыгрыше %d", s.test and "Тестовый рейд" or "Рейд", active, #s.loot), 1, 1, 1)
-				local missing = ns.MissingTotal()
-				if missing > 0 then tt:AddLine("Добыча не в розыгрыше: " .. missing, 1, 0.82, 0) end
+				local unrolled = ns.UnrolledCount()
+				if unrolled > 0 then tt:AddLine("Ещё не разыграно: " .. unrolled, 1, 0.82, 0) end
 			else
 				tt:AddLine("Рейд не начат", 0.6, 0.6, 0.6)
 			end

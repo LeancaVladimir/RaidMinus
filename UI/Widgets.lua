@@ -270,6 +270,47 @@ function UI.EditBox(parent, width, placeholder, onEnter)
 	return e
 end
 
+-- многострочное поле с прокруткой (свой код триггера). Как в WeakAuras: «|» в поле удваивается,
+-- box:GetCode() / box:SetCode(text) работают с обычным текстом. onCommit(text) — при уходе фокуса.
+function UI.CodeBox(parent, width, height, onCommit)
+	local box = UI.Box(parent)
+	box:SetWidth(width)
+	box:SetHeight(height)
+	local scroll = CreateFrame("ScrollFrame", NextName("CodeScroll"), box, "UIPanelScrollFrameTemplate")
+	scroll:SetPoint("TOPLEFT", 6, -6)
+	scroll:SetPoint("BOTTOMRIGHT", -26, 6)
+	local e = CreateFrame("EditBox", NextName("Code"), scroll)
+	e:SetMultiLine(true)
+	e:SetAutoFocus(false)
+	e:SetFontObject(ChatFontNormal)
+	e:SetWidth(width - 36)
+	e:SetHeight(height - 12)
+	e:SetTextInsets(2, 2, 2, 2)
+	e:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+	e:SetScript("OnTabPressed", function(self) self:Insert("  ") end)
+	-- прокрутка за курсором — помощники FrameXML (как в окне макросов)
+	if ScrollingEdit_OnTextChanged and ScrollingEdit_OnCursorChanged and ScrollingEdit_OnUpdate then
+		e:SetScript("OnTextChanged", function(self) ScrollingEdit_OnTextChanged(self, scroll) end)
+		e:SetScript("OnCursorChanged", ScrollingEdit_OnCursorChanged)
+		e:SetScript("OnUpdate", function(self, elapsed) ScrollingEdit_OnUpdate(self, elapsed, scroll) end)
+	end
+	e:SetScript("OnEditFocusLost", function(self)
+		if onCommit then onCommit(box:GetCode()) end
+	end)
+	scroll:SetScrollChild(e)
+	-- клик по пустому месту — в поле
+	box:EnableMouse(true)
+	box:SetScript("OnMouseDown", function() e:SetFocus() end)
+	box.edit = e
+	function box:GetCode() return (e:GetText():gsub("||", "|")) end
+	function box:SetCode(text)
+		e:SetText((tostring(text or ""):gsub("|", "||")))
+		e:SetCursorPosition(0)
+		scroll:SetVerticalScroll(0)
+	end
+	return box
+end
+
 -- список с прокруткой: rows строк высотой rowH; make(row, i) оформляет строку.
 -- box:Draw(items, draw) рисует видимую часть; box.redraw вызывается при прокрутке.
 function UI.List(parent, rows, rowH, make)
@@ -329,7 +370,7 @@ function UI.Select(row, on)
 	end
 end
 
--- цветная метка правила: красная — автоматика, оранжевая — видно, кто нарушил, белая — вручную
+-- цветная метка правила: красная — триггер включён, белая — вручную
 function UI.KindMark(row)
 	local t = row:CreateTexture(nil, "ARTWORK")
 	t:SetTexture(FLAT)

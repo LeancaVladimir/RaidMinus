@@ -1,7 +1,6 @@
 -- Объявления в рейд и шёпот-команды.
 -- Новые минусы копятся и уходят одним сообщением: сразу после серии кликов или после боя
--- (настройка announce; у правила может быть свой режим — ev.ann). Игроку аддон не нужен:
--- !минус в шёпот — его сумма и список; у правила с «шепнуть игроку» он сразу получает причину.
+-- (настройка announce). Игроку аддон не нужен: !минус в шёпот — его сумма и список.
 
 local _, ns = ...
 
@@ -18,8 +17,8 @@ local flushTimer
 
 local function Settings() return ns.DB.settings end
 
--- режим объявления записи: свой у правила или общий
-local function Mode(ev) return ev.ann or Settings().announce end
+-- режим объявления (общий для всех правил)
+local function Mode() return Settings().announce end
 
 local function ScheduleFlush(delay)
 	ns.Cancel(flushTimer)
@@ -92,14 +91,6 @@ function ns.AnnounceCancel(ev)
 	local msg = "Снято: " .. ns.EventShort(ev)
 	if ev.reason then msg = msg .. " — " .. ev.reason end
 	ns.Announce(msg)
-end
-
--- игроку шёпотом: за что и сколько у него теперь
-function ns.WhisperEvent(ev)
-	local where = ev.boss and (" (" .. ns.ShortName(ev.boss) .. ")") or ""
-	local msg = format("%sВам %s: %s%s. Итого: %s.", REPLY_PREFIX, ns.EffectText(ev), ns.EventChat(ev), where,
-		ns.StateText(ev.player, false))
-	ns.QueueWhisper(ev.player, msg)
 end
 
 ns.On("PLAYER_REGEN_ENABLED", function()

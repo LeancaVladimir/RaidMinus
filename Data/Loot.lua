@@ -1,12 +1,11 @@
--- Добыча ЦЛК по боссам — все сложности (10, 10 гер., 25, 25 гер.; из AtlasLoot) — и фильтр «важной» добычи.
--- По таблице аддон узнаёт, с какого босса предмет, даже если тело открывал не РЛ, и отличает снаряжение
--- от мусора (осколки, саронит). Все сложности нужны потому, что в рейде «25 ХМ» отдельного босса
--- (часто Профа) могут убить на обычной — его добыча тоже разыгрывается.
--- Предмет не из таблиц проходит фильтр, если он эпический, надевается и его уровень не ниже настройки.
+-- Добыча ЦЛК по боссам — все сложности (10, 10 гер., 25, 25 гер.; из AtlasLoot) — и мусор.
+-- По таблице аддон узнаёт, с какого босса предмет в списке розыгрыша (для истории). Все сложности нужны
+-- потому, что в рейде «25 ХМ» отдельного босса (часто Профа) могут убить на обычной.
+-- Мусор (осколки, саронит, эмблемы) не попадает в розыгрыш, даже если его взяли в сумку.
 
 local _, ns = ...
 
-local tonumber, ipairs, pairs, select = tonumber, ipairs, pairs, select
+local ipairs, pairs = ipairs, pairs
 
 -- [босс] = {25 гер., 25 об., 10 гер., 10 об.}
 local ICC = {
@@ -89,7 +88,6 @@ local DIFF_NAMES = {"25 гер.", "25", "10 гер.", "10"}
 local TOKENS = {[52025] = true, [52026] = true, [52027] = true, [52028] = true, [52029] = true, [52030] = true}
 -- никогда не в розыгрыш: осколок Льда Тьмы (квест), древнейший саронит, эмблемы, кристаллы, сущность Синдрагосы
 local JUNK = {[50274] = true, [49908] = true, [49426] = true, [47241] = true, [34057] = true, [51026] = true}
-local MOUNT = {[50818] = true} -- Поводья Непобедимого
 
 local bossOf, diffOf = {}, {}
 for boss, lists in pairs(ICC) do
@@ -109,41 +107,7 @@ function ns.LootDifficulty(id) return id and DIFF_NAMES[diffOf[id] or 0] end
 
 function ns.IsToken(id) return id and TOKENS[id] or false end
 
--- проходит ли предмет фильтр «важной» добычи; второе значение — почему нет
--- (ilvl и качество берутся из ссылки или из сообщения RaidRoll, если клиент ещё не знает предмет)
-function ns.LootWanted(id, link, ilvl, quality)
-	if not id then return false, "нет предмета" end
-	if JUNK[id] then return false, "мусор" end
-	local set = ns.DB.settings
-	if TOKENS[id] or MOUNT[id] then return true end
-	if bossOf[id] then
-		if set.lootFilter == "heroic" and diffOf[id] ~= 1 and diffOf[id] ~= 3 then return false, "не гер." end
-		return true
-	end
-	local name, _, q, level, _, _, _, _, equip = GetItemInfo(link or id)
-	q = q or quality
-	level = level or ilvl
-	if set.lootFilter == "epic" then
-		if (q or 0) >= (set.lootQuality or 4) then return true end
-		return false, "качество"
-	end
-	if (q or 0) < 4 then return false, "не эпик" end
-	if name and (not equip or equip == "") then return false, "не надевается" end
-	if not level then return false, "уровень неизвестен" end
-	if level < (set.lootMinIlvl or 277) then return false, "ilvl " .. level end
-	return true
-end
-
--- подпись категории для списка добычи
-function ns.LootKind(id, link)
-	if not id then return "" end
-	if TOKENS[id] then return "жетон" end
-	if MOUNT[id] then return "маунт" end
-	local cat = ns.ItemCategory(link or ("item:" .. id))
-	if cat == "trinket" then return "тринкет" end
-	if cat == "lk_weapon" then return "оружие Лича" end
-	local equip = select(9, GetItemInfo(link or id))
-	return equip and _G[equip] or ""
-end
+-- мусор: в список розыгрыша не попадает, даже если его взяли в сумку
+function ns.IsJunk(id) return id and JUNK[id] or false end
 
 ns.LOOT_TABLE = ICC

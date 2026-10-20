@@ -65,24 +65,16 @@ local function RoleMenu(name)
 end
 
 function ns.RuleMenu(rule)
-	local menu = {
-		{text = ns.ShortText(ns.RuleText(rule)), isTitle = true, notCheckable = true},
-		{text = "Включено", checked = not rule.off, func = function()
-			rule.off = (not rule.off) or nil
-			ns.Refresh()
-		end},
-	}
-	if rule.auto then
-		tinsert(menu, {text = "Ставить сразу (без проверки)", checked = rule.instant, func = function()
-			rule.instant = (not rule.instant) or nil
+	local menu = {{text = ns.ShortText(ns.RuleText(rule)), isTitle = true, notCheckable = true}}
+	if rule.trig then
+		tinsert(menu, {text = "Триггер включён", checked = rule.trig.on, func = function()
+			rule.trig.on = (not rule.trig.on) or nil
+			ns.TriggersDirty()
 			ns.Refresh()
 		end})
 	end
-	tinsert(menu, {text = "Быстрая кнопка (мини-панель, меню цели)", checked = rule.quick, func = function()
-		rule.quick = (not rule.quick) or nil
-		ns.Refresh()
-	end})
 	tinsert(menu, {text = "Настроить...", notCheckable = true, func = function() ns.EditRule(rule) end})
+	tinsert(menu, {text = rule.trig and "Триггер..." or "Добавить триггер...", notCheckable = true, func = function() ns.EditRule(rule, "trig") end})
 	Menu(menu)
 end
 
@@ -143,8 +135,7 @@ local function CreateRail(f)
 	local legend = UI.Text(f, "GameFontDisableSmall")
 	legend:SetPoint("TOPLEFT", box, "BOTTOMLEFT", 4, -8)
 	legend:SetWidth(RAIL_W - 8)
-	legend:SetText("Метка правила:\n|c" .. ns.KIND_HEX.auto .. "автоматика|r\n|c" .. ns.KIND_HEX.known .. "видно, кто нарушил|r\n|c"
-		.. ns.KIND_HEX.manual .. "вручную|r\n|cffffd100»|r быстрая кнопка")
+	legend:SetText("Метка правила:\n|c" .. ns.KIND_HEX.auto .. "триггер включён|r\n|c" .. ns.KIND_HEX.manual .. "вручную|r")
 	local now = UI.FlatButton(f, "К текущему боссу", RAIL_W, 22, function()
 		ns.ui.viewBoss = ns.CurrentBoss() or ns.ui.viewBoss
 		ns.RefreshUI()
@@ -165,14 +156,8 @@ end
 -- центр: правила
 
 local function RuleChips(r)
-	local parts = {}
-	if r.off then return "|cff707070выкл|r" end
-	if r.instant then tinsert(parts, "|cffffd100сразу|r") end
-	if r.kick then tinsert(parts, "|cffff5050кик|r") end
-	if r.rep == "fight" then tinsert(parts, "|cff9d9d9d1/бой|r") elseif r.rep == "raid" then tinsert(parts, "|cff9d9d9d1/рейд|r") end
-	if r.step then tinsert(parts, "|cff9d9d9d" .. ns.ValueText(r.step) .. "/раз|r") end
-	if not ns.RuleDiffOk(r) then tinsert(parts, "|cff707070не эта сложность|r") end
-	return tconcat(parts, " ")
+	if not r.trig then return "" end
+	return r.trig.on and "|cffff6060триггер|r" or "|cff707070триггер выкл|r"
 end
 
 local function MakeRuleRow(row)
@@ -205,8 +190,6 @@ local function MakeRuleRow(row)
 		if not r then return end
 		if button == "RightButton" then
 			ns.RuleMenu(r)
-		elseif r.off then
-			ns.Print("правило выключено — включите его (ПКМ по правилу).")
 		else
 			Apply(r)
 		end
@@ -214,24 +197,16 @@ local function MakeRuleRow(row)
 	UI.Tooltip(row, function(tt, self)
 		local r = self.item and self.item.rule
 		if not r then return false end
-		local kind = ns.RuleKind(r)
 		tt:SetText(ns.RuleText(r), 1, 1, 1, true)
-		tt:AddLine(ns.KIND_NAMES[kind], unpack(ns.KIND_COLORS[kind]))
-		if r.note then tt:AddLine(r.note, 0.8, 0.8, 0.8, true) end
 		if ns.ChatText(r) ~= ns.RuleText(r) then tt:AddLine("В чат: " .. ns.ChatText(r), 0.6, 0.8, 1, true) end
-		local d = ns.Detector(r.auto)
-		if d then
-			tt:AddLine(d.how, 0.7, 0.7, 0.7, true)
-			tt:AddLine(r.instant and "Находка сразу ставится игроку" or "Находка идёт во вкладку «На проверку»", 1, 0.82, 0)
-		end
-		if r.off then tt:AddLine("Выключено", 1, 0.3, 0.3) end
+		tt:AddLine("Триггер: " .. ns.TrigSummary(r), 0.8, 0.8, 0.8, true)
 		local names = ns.SelectedNames()
 		if #names == 0 then
 			tt:AddLine("Сначала выберите игроков справа", 1, 0.5, 0.3)
 		else
 			tt:AddLine("Поставить: " .. tconcat(names, ", "), 0.6, 1, 0.6, true)
 		end
-		tt:AddLine("ПКМ — включить, «сразу», быстрая кнопка; шестерёнка — настройка", 0.6, 0.6, 0.6, true)
+		tt:AddLine("ПКМ — триггер вкл/выкл; шестерёнка — настройка", 0.6, 0.6, 0.6, true)
 	end)
 end
 
@@ -251,18 +226,12 @@ local function DrawRuleRow(row, item)
 	row:Enable()
 	row.gear:Show()
 	row.kind:SetVertexColor(unpack(ns.KIND_COLORS[ns.RuleKind(r)]))
-	row.kind:SetAlpha(r.off and 0.3 or 1)
 	row.kind:Show()
 	local text = ns.RuleText(r)
 	if item.prefix then text = "|cff8e8e9b" .. item.prefix .. ":|r " .. text end
-	if r.quick then text = text .. " |cffffd100»|r" end
-	row.text:SetText(r.off and ("|cff707070" .. ns.RuleText(r) .. "|r") or text)
+	row.text:SetText(text)
 	row.chips:SetText(RuleChips(r))
-	if r.kick and r.value == 0 then
-		row.value:SetText("")
-	else
-		row.value:SetText(r.off and ("|cff707070" .. ns.ValueText(r.value) .. "|r") or ns.ValueColor(r.value))
-	end
+	row.value:SetText(ns.ValueColor(r.value))
 	row.bg:SetTexture(0, 0, 0, 0)
 end
 
@@ -432,10 +401,8 @@ end
 local function DrawRosterRow(row, p)
 	row.group:SetText(p.group or "")
 	row.name:SetText(p.gone and ("|cff808080" .. p.name .. "|r") or ns.ColorName(p.name, p.class))
-	local total, kick, n = ns.PlayerState(p.name)
-	local text = n > 0 and ns.ValueColor(total) or ""
-	if kick then text = "|cffff2020кик|r " .. text end
-	row.total:SetText(text)
+	local total, n = ns.PlayerState(p.name)
+	row.total:SetText(n > 0 and ns.ValueColor(total) or "")
 	local role, cur = ns.PlayerRole(p.name)
 	row.role:SetText(ns.RoleName(role, true) .. ((cur and role and cur ~= role) and "|cffff9020*|r" or ""))
 	UI.Select(row, ns.ui.selected[p.name])

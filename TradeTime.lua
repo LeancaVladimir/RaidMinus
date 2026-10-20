@@ -2,8 +2,8 @@
 -- после того, как его взяли из тела. Откуда аддон знает, сколько осталось:
 --   точно — предмет в моей сумке: подсказка «можно передать … в течение 1 ч. 12 мин.» (я ответственный за добычу);
 --   точно — ответственный с RaidMinus прислал время из своей сумки (Sync.lua, TT);
---   почти точно — строка «Холпал получает добычу» (пошли 2 часа);
---   оценка (~) — 2 часа от убийства босса.
+--   почти точно — строка «Холпал получает добычу» (пошли 2 часа, LootList.lua);
+--   оценка (~) — 2 часа от появления предмета в списке.
 -- Здесь же: мой обмен с игроком — он «получил» предмет (выиграл один, а отдали другому — видно сразу),
 -- и предупреждение, когда на передачу неразданного предмета остаётся мало времени.
 
@@ -58,10 +58,6 @@ function ns.ApplyTradeTimes(byId, mine)
 			if not sec then break end
 			e.expires, e.exact = now + sec, true
 			if mine then e.holder = ns.PlayerName() end
-			local page = e.drop and ns.DropById(e.drop)
-			for _, item in ipairs(page and page.items or {}) do
-				if item.loot == e.id then item.expires, item.exact = e.expires, true end
-			end
 		end
 	end
 	ns.Refresh()

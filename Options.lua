@@ -55,7 +55,7 @@ local options = {
 				hdrChat = {type = "header", name = "Объявления и шёпот", order = 1},
 				announce = {
 					type = "select", name = "Объявлять минусы в рейд", order = 2, width = "double",
-					desc = "У каждого правила можно выбрать своё (вкладка «Правила», поле «Объявление»).",
+					desc = "Для всех правил: и поставленных кликом, и поставленных триггером.",
 					values = {instant = "сразу после клика", combat = "после боя (в бою копятся)", off = "не объявлять"},
 				},
 				whisper = {type = "toggle", name = "Отвечать на !минус в шёпот", order = 3, width = "full"},
@@ -86,32 +86,9 @@ local options = {
 
 				hdrLoot = {type = "header", name = "Добыча", order = 20},
 				lootDesc = {type = "description", order = 20.1, fontSize = "medium",
-					name = "Аддон сам узнаёт, что упало с босса, даже если тело открывали не вы, и записывает важное в розыгрыш. Окно «Добыча» (/rm добыча) листает боссов стрелками и показывает, что не включено."},
-				lootFilter = {
-					type = "select", name = "Что разыгрывать", order = 21, width = "double",
-					values = {
-						boss = "снаряжение с боссов ЦЛК любой сложности, жетоны, маунт",
-						heroic = "только гер. снаряжение ЦЛК (босс на обычной — его добыча скрыта)",
-						epic = "все эпики (кроме мусора)",
-					},
-					desc = "Осколки Льда Тьмы, саронит и эмблемы не разыгрываются никогда. Скрытое фильтром можно добавить вручную «+».",
-				},
-				lootMinIlvl = {
-					type = "range", name = "Предметы не из таблиц ЦЛК: уровень от", order = 22, min = 200, max = 290, step = 1,
-					disabled = function() return ns.DB.settings.lootFilter == "epic" end,
-					desc = "Предмет, которого нет в таблицах добычи ЦЛК (другой рейд), проходит, если он эпический, надевается и его уровень не ниже этого.",
-				},
-				lootAuto = {type = "toggle", name = "Прошедшее фильтр сразу добавлять в розыгрыш", order = 23, width = "full"},
-				lootPopup = {
-					type = "select", name = "Окно «Добыча» открывать само", order = 24, width = "double",
-					values = {new = "при новой добыче", missing = "только если что-то не в розыгрыше", off = "не открывать"},
-				},
-				srcCorpse = {type = "toggle", name = "Источник: тело, которое открыл я", order = 25, width = "full"},
-				srcRaidRoll = {type = "toggle", name = "Источник: тело открыл другой с аддоном RaidRoll", order = 26, width = "full",
-					desc = "RaidRoll рассылает добычу тела всему рейду по скрытому каналу — так видно добычу, даже если тело открыли не вы."},
-				srcChat = {type = "toggle", name = "Источник: строки «Вася получает добычу: [предмет]»", order = 27, width = "full"},
-				srcList = {type = "toggle", name = "Источник: список ссылок от лидера, ассистента или ответственного", order = 28, width = "full"},
-				srcSync = {type = "toggle", name = "Источник: тело открыл другой игрок с RaidMinus", order = 28.5, width = "full"},
+					name = "Предмет попадает в розыгрыш двумя путями: РЛ, помощник или ответственный взяли его в сумку "
+						.. "(«… получает добычу» — пошли 2 часа на передачу) или разыгрывают сразу — ссылкой в объявлении рейду. "
+						.. "Осколки Льда Тьмы, саронит и эмблемы, взятые в сумку, не записываются."},
 				tradeWarn = {type = "toggle", name = "Предупреждать, что на передачу предмета осталось 15 и 5 минут", order = 29, width = "full",
 					desc = "Предмет из рейда можно передать только 2 часа после того, как его взяли из тела. Время видно во вкладках «Розыгрыш» и «Добыча»."},
 
@@ -124,10 +101,10 @@ local options = {
 
 				hdrQuick = {type = "header", name = "Быстрые минусы и клавиши", order = 30},
 				keyTarget = Binding("RAIDMINUS_TARGET", "Минус цели (меню 1-9)", 31,
-					"Возьмите игрока рейда в цель и нажмите: у курсора меню правил текущего босса и быстрых «Общих», цифра — поставить."),
+					"Возьмите игрока рейда в цель и нажмите: у курсора меню правил текущего босса и «Общих», цифра — поставить."),
 				keyCompact = Binding("RAIDMINUS_COMPACT", "Мини-панель", 32),
 				keyToggle = Binding("RAIDMINUS_TOGGLE", "Окно RaidMinus", 33),
-				keyLoot = Binding("RAIDMINUS_LOOT", "Окно «Добыча»", 34),
+				keyLoot = Binding("RAIDMINUS_LOOT", "Окно «Розыгрыш»", 34),
 				compactAuto = {type = "toggle", name = "Мини-панель сама появляется на пуле босса, если окно закрыто", order = 35, width = "full"},
 
 				hdrOther = {type = "header", name = "Прочее", order = 40},
@@ -191,8 +168,9 @@ local options = {
 					set = function() end,
 				},
 				import = {
-					type = "input", name = "Импорт: вставьте строку RM1:... (Ctrl+V) и нажмите «Принять»", order = 22,
+					type = "input", name = "Импорт: вставьте строку RM2:... или RM1:... (Ctrl+V) и нажмите «Принять»", order = 22,
 					width = "full", multiline = 5,
+					desc = "Триггеры со своим кодом из чужой строки приходят выключенными: прочитайте код и включите сами.",
 					get = function() return importText end,
 					set = function(_, v)
 						local rs, err = ns.ImportRuleset(v)
@@ -200,6 +178,9 @@ local options = {
 							importText = ""
 							ns.SetActiveRuleset(rs.id)
 							ns.Print(format("импортирован свод «%s», правил: %d.", rs.name, #rs.rules))
+							if err and err > 0 then
+								ns.Print(format("|cffffd100правил со своим кодом: %d — их триггеры выключены. Проверьте код (вкладка «Правила» → «Триггер») и включите сами.|r", err))
+							end
 						else
 							importText = v
 							ns.Print("импорт не удался: " .. tostring(err))

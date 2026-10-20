@@ -1,7 +1,7 @@
 -- Быстрые минусы в бою (из варианта C):
 --   «минус цели» — клавиша (Назначение клавиш → RaidMinus) открывает у курсора меню правил текущего
---     босса и быстрых «Общих» с цифрами 1–9: цифра — поставить цели (или выбранным в окне), Esc — закрыть;
---   мини-панель — маленькое окно поверх игры: кому, быстрые кнопки, счётчики «проверка» и «добыча»;
+--     босса, затем «Общих», с цифрами 1–9: цифра — поставить цели (или выбранным в окне), Esc — закрыть;
+--   мини-панель — маленькое окно поверх игры: кому, кнопки правил, счётчик «розыгрыш», «Отменить»;
 --   всплывашка — после клика вне окна: что поставлено и «Отменить».
 
 local _, ns = ...
@@ -18,12 +18,12 @@ BINDING_HEADER_RAIDMINUS = "RaidMinus"
 BINDING_NAME_RAIDMINUS_TOGGLE = "Окно RaidMinus"
 BINDING_NAME_RAIDMINUS_COMPACT = "Мини-панель"
 BINDING_NAME_RAIDMINUS_TARGET = "Минус цели (меню с цифрами 1-9)"
-BINDING_NAME_RAIDMINUS_LOOT = "Окно «Добыча»"
+BINDING_NAME_RAIDMINUS_LOOT = "Окно «Розыгрыш»"
 
 function RaidMinus_Toggle() ns.ToggleWindow() end
 function RaidMinus_ToggleCompact() ns.ToggleCompact() end
 function RaidMinus_TargetMenu() ns.TargetMenu() end
-function RaidMinus_LootWindow() ns.ShowLootWindow() end
+function RaidMinus_LootWindow() ns.ShowTab("loot") end
 
 -------------------------------------------------------------------------------
 -- кому и какие правила
@@ -37,33 +37,16 @@ function ns.QuickTargets()
 	return ns.SelectedNames()
 end
 
--- правила для быстрых кнопок: включённые правила текущего босса (с автоматикой — её можно поставить
--- и вручную), затем «Общие» с пометкой «быстрая»; пока быстрых нет — первые «Общие»
+-- правила для быстрых кнопок: правила текущего босса (и с триггером — их можно поставить и вручную),
+-- затем «Общие»
 function ns.QuickRules()
 	local rs = ns.ActiveRuleset()
 	local out = {}
 	local boss = ns.CurrentBoss() or ns.ui.viewBoss
 	if boss and boss ~= "general" then
-		for _, r in ipairs(ns.RulesFor(rs, boss)) do
-			if not r.off then tinsert(out, r) end
-		end
+		for _, r in ipairs(ns.RulesFor(rs, boss)) do tinsert(out, r) end
 	end
-	local quick = 0
-	for _, r in ipairs(ns.RulesFor(rs, "general")) do
-		if not r.off and r.quick then
-			tinsert(out, r)
-			quick = quick + 1
-		end
-	end
-	if quick == 0 then
-		local added = 0
-		for _, r in ipairs(ns.RulesFor(rs, "general")) do
-			if not r.off and added < 4 then
-				tinsert(out, r)
-				added = added + 1
-			end
-		end
-	end
+	for _, r in ipairs(ns.RulesFor(rs, "general")) do tinsert(out, r) end
 	return out
 end
 
@@ -76,10 +59,7 @@ local function ApplyQuick(rule)
 	ns.AddEvents(names, rule)
 end
 
-local function ValueLabel(r)
-	if r.kick and r.value == 0 then return "|cffff5050кик|r" end
-	return ns.ValueColor(r.value)
-end
+local function ValueLabel(r) return ns.ValueColor(r.value) end
 
 local function WhoText()
 	local names, isTarget = ns.QuickTargets()
@@ -187,8 +167,7 @@ function ns.TargetMenu()
 			row.num:SetText(i <= 9 and tostring(i) or "")
 			row:SetLabel(ns.RuleText(r))
 			row.value:SetText(ValueLabel(r))
-			local c = ns.KIND_COLORS[ns.RuleKind(r)]
-			row:SetTextColor(r.boss == "general" and {1, 0.88, 0.6} or c)
+			row:SetTextColor(r.boss == "general" and {1, 0.88, 0.6} or ns.KIND_COLORS.manual)
 			row:Show()
 		elseif menuRows[i] then
 			menuRows[i]:Hide()
@@ -275,8 +254,11 @@ local function CreateCompact()
 		tinsert(counters, b)
 		return b
 	end
-	counters.queue = Counter("Проверка", 96, function() ns.ShowTab("queue") end)
-	counters.drops = Counter("Добыча", 90, function() ns.ShowLootWindow() end)
+	counters.loot = Counter("Розыгрыш", 100, function() ns.ShowTab("loot") end)
+	counters.loot.tooltip = function(tt)
+		tt:SetText("Розыгрыш")
+		tt:AddLine("Число — предметы, которые ещё не разыграны (лежат в сумке).", 1, 1, 1, true)
+	end
 	counters.undo = Counter("Отменить", 80, function() ns.UndoLast() end)
 	compact:SetScript("OnUpdate", function(self, elapsed)
 		self.t = (self.t or 0) + elapsed
@@ -320,17 +302,13 @@ function ns.RefreshCompact()
 	end
 	local lines = math.max(1, math.ceil(shown / 2))
 	local y = -56 - lines * 27 - 4
-	local queue = #ns.QueueList()
-	counters.queue:SetLabel(queue > 0 and format("Проверка |cffff6060%d|r", queue) or "Проверка")
-	local missing = s and ns.MissingTotal() or 0
-	counters.drops:SetLabel(missing > 0 and format("Добыча |cffffd100%d|r", missing) or "Добыча")
+	local unrolled = s and ns.UnrolledCount() or 0
+	counters.loot:SetLabel(unrolled > 0 and format("Розыгрыш |cffffd100%d|r", unrolled) or "Розыгрыш")
 	counters.undo:SetEnabledFlat(#ns.LastGroup() > 0)
-	counters.queue:ClearAllPoints()
-	counters.queue:SetPoint("TOPLEFT", 10, y)
-	counters.drops:ClearAllPoints()
-	counters.drops:SetPoint("LEFT", counters.queue, "RIGHT", 4, 0)
+	counters.loot:ClearAllPoints()
+	counters.loot:SetPoint("TOPLEFT", 10, y)
 	counters.undo:ClearAllPoints()
-	counters.undo:SetPoint("LEFT", counters.drops, "RIGHT", 4, 0)
+	counters.undo:SetPoint("LEFT", counters.loot, "RIGHT", 4, 0)
 	compact:SetHeight(-y + 30)
 end
 

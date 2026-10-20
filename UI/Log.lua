@@ -67,8 +67,7 @@ local function MakeRow(row)
 		if not ev then return false end
 		tt:SetText(ns.ColorName(ev.player, ev.class) .. "  " .. ns.ValueColor(ev.value))
 		tt:AddLine(ev.text, 1, 1, 1, true)
-		if ev.kick then tt:AddLine("Пометка: на кик", 1, 0.2, 0.2) end
-		if ev.detail then tt:AddLine("Автоматика: " .. ev.detail, 0.6, 0.8, 1, true) end
+		if ev.detail then tt:AddLine("Триггер: " .. ev.detail, 0.6, 0.8, 1, true) end
 		tt:AddLine(format("%s · %s · поставил %s", date("%H:%M", ev.t), ns.BossText(ev.boss, ev.pull), tostring(ev.by)), 0.6, 0.6, 0.6)
 		if ev.status == "cancelled" then
 			tt:AddLine("Снято: " .. tostring(ev.cancelledBy) .. (ev.reason and (" — " .. ev.reason) or ""), 1, 0.5, 0.3, true)
@@ -83,10 +82,9 @@ local function DrawRow(row, ev)
 	row.boss:SetText(ns.BossText(ev.boss, ev.pull))
 	row.player:SetText(gone and (gray .. ev.player .. "|r") or ns.ColorName(ev.player, ev.class))
 	row.text:SetText(gone and (gray .. ev.text .. "|r") or ev.text)
-	local v = ns.ValueColor(ev.value)
-	if ev.kick then v = "|cffff2020кик|r " .. v end
-	row.value:SetText(gone and (gray .. ns.ValueText(ev.value) .. "|r") or v)
-	row.by:SetText(gone and "|cffff8040снято|r" or ("|cff9d9d9d" .. tostring(ev.by) .. "|r"))
+	row.value:SetText(gone and (gray .. ns.ValueText(ev.value) .. "|r") or ns.ValueColor(ev.value))
+	local by = ev.auto and "|cffff6060триггер|r" or ("|cff9d9d9d" .. tostring(ev.by) .. "|r")
+	row.by:SetText(gone and "|cffff8040снято|r" or by)
 	UI.Select(row, ns.ui.event == ev.id)
 end
 

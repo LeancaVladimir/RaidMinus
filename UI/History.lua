@@ -61,7 +61,7 @@ local function PlayerTotals(s)
 		if ev.status ~= "cancelled" then
 			local p = get(ev.player)
 			p.total = p.total + (ev.value or 0)
-			if (ev.value or 0) < 0 or ev.kick then p.minus = p.minus + 1 else p.plus = p.plus + 1 end
+			if (ev.value or 0) < 0 then p.minus = p.minus + 1 else p.plus = p.plus + 1 end
 			tinsert(p.events, ev)
 		end
 	end
@@ -113,7 +113,7 @@ function ns.RaidReport(s)
 		if #p.events > 0 then
 			local parts = {}
 			for _, ev in ipairs(p.events) do
-				tinsert(parts, format("%s: %s %s", ns.ShortName(ev.boss), ns.EventChat(ev), ns.EffectText(ev)))
+				tinsert(parts, format("%s: %s %s", ns.ShortName(ev.boss), ns.EventChat(ev), ns.ValueText(ev.value)))
 			end
 			tinsert(lines, format("%s %s — %s", p.name, ns.ValueText(p.total), tconcat(parts, "; ")))
 		end

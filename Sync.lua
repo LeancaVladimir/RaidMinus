@@ -4,7 +4,6 @@
 --                         их кнопка «Начать ролл» недоступна, броски они тихо считают со своими минусами;
 --   RE ссылка победитель ничья — ролл закончен; RC ссылка — ролл отменён;
 --   AW ссылка игрок      — предмет фактически получил другой игрок (не победитель); пусто — сброс;
---   LT тело номера       — я открыл тело: что в нём лежит (как RaidRoll, но не нужен второй аддон);
 --   TT номер:сек,...     — сколько осталось на передачу предметов из моей сумки (я ответственный за добычу);
 --   HI                   — я только вошёл (/reload): кто сейчас разыгрывает — напомните.
 -- Ролл, итог и «получил» принимаются только от РЛа, помощника и ответственного за добычу.
@@ -47,19 +46,6 @@ end
 function ns.SyncRollCancel(link) Send("RC", link) end
 
 function ns.SyncAward(e) Send("AW", e.link, e.receiver or "") end
-
--- я открыл тело: остальным — номера предметов (один раз на тело)
-function ns.SyncLoot(mob, items, guid)
-	local s = ns.Session()
-	if not s or not Channel() then return end
-	s.syncedBodies = s.syncedBodies or {}
-	local key = guid or ((mob or "?") .. date("%H%M"))
-	if s.syncedBodies[key] then return end
-	s.syncedBodies[key] = true
-	local ids = {}
-	for _, x in ipairs(items) do tinsert(ids, x.id) end
-	Send("LT", mob or "", tconcat(ids, ","))
-end
 
 -- время на передачу из моей сумки: {[номер] = {сек, ...}}
 local lastTT = 0
@@ -165,16 +151,6 @@ local function OnAward(link, name, sender)
 	if target then ns.SetReceiver(target, name, "от " .. sender) end
 end
 
-local function OnLootList(mob, list, sender)
-	if not Settings().srcSync or not ns.IsHere(sender) then return end
-	local items = {}
-	for n in tostring(list or ""):gmatch("%d+") do
-		local id = tonumber(n)
-		tinsert(items, {id = id, link = ns.ItemLink(id)})
-	end
-	if #items > 0 then ns.ReportLoot("sync", sender, mob ~= "" and mob or nil, items) end
-end
-
 local function OnTradeTimes(list, sender)
 	if not ns.officers[sender] then return end
 	local byId = {}
@@ -197,9 +173,7 @@ end
 function ns.OnSyncMessage(msg, channel, sender)
 	if not ns.Session() or not Settings().sync or sender == ns.PlayerName() then return end
 	local cmd, a, b, c = strsplit("\t", msg or "")
-	if cmd == "LT" then
-		OnLootList(a, b, sender)
-	elseif cmd == "TT" then
+	if cmd == "TT" then
 		OnTradeTimes(a, sender)
 	elseif cmd == "HI" then
 		OnHello()

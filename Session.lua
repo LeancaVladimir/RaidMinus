@@ -26,7 +26,7 @@ ns.officers = {} -- лидер, ассистенты и ответственны
 
 -------------------------------------------------------------------------------
 -- роли: основная (первая замеченная за рейд или выставленная РЛом) и текущий спек.
--- Хил, переодетый на Орке в ДД, остаётся хилом — планка ДПС его не касается.
+-- Хил, переодетый на Орке в ДД, остаётся хилом — условие триггера «роль виновного» смотрит основную роль.
 
 ns.ROLES = {
 	{key = "tank", name = "танк", color = "ffc79c6e"},
@@ -105,7 +105,6 @@ function ns.StartSession(test)
 		nextId = 0,
 		pulls = {},
 		loot = {},
-		drops = {},
 		nextLoot = 0,
 	}
 	if test then
@@ -174,6 +173,7 @@ function ns.UpdateRoster()
 			DetectRole(s.roster[me], "player")
 		end
 		ns.here[me] = 1
+		ns.officers[me] = true
 		ns.masterLooter = "Холпал" -- в тестовом рейде ответственный за добычу — Холпал (Test.lua)
 		return
 	end
@@ -323,7 +323,6 @@ function ns.BossKilled(key)
 	s.killed[key] = true
 	s.lastKill = {boss = key, t = time()}
 	if ns.OnFightEnd then ns.OnFightEnd(key, "kill") end
-	if ns.MetricsOnKill then ns.MetricsOnKill(key) end
 	ns.Refresh()
 	ns.After(8, ReloadPrompt)
 end

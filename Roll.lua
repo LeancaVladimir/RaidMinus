@@ -1,6 +1,6 @@
 -- Розыгрыш: приём /roll, итог = ролл + сумма минусов и плюсов игрока.
--- Засчитывается первый бросок 1-rollMax; повторные подсвечиваются. Кто на кике — в таблице,
--- но не побеждает. Ничья на первом месте — переролл только для них.
+-- Засчитывается первый бросок 1-rollMax; повторные подсвечиваются; бросок не того диапазона
+-- в таблице, но не побеждает. Ничья на первом месте — переролл только для них.
 -- Наблюдение: ролл объявил другой (LootList.lua) — аддон молча считает броски с минусами,
 -- в чат пишет только по кнопке «Закончить розыгрыш».
 -- Текущий ролл живёт в памяти (ns.roll); итог пишется в запись добычи (loot.result).
@@ -175,11 +175,11 @@ end)
 -- считает модификатор, итог и допуск; сортирует: допущенные выше, по итогу
 function ns.ComputeRoll(r)
 	for _, e in ipairs(r.entries) do
-		local ok, reason, mod = ns.CanRoll(e.name)
+		local mod = ns.PlayerState(e.name)
 		e.mod = mod
 		e.final = e.roll + mod
-		if e.bad then ok, reason = false, "ролл " .. e.bad end
-		e.ok, e.reason = ok, reason
+		e.ok = not e.bad
+		e.reason = e.bad and ("ролл " .. e.bad) or nil
 	end
 	table.sort(r.entries, function(a, b)
 		if a.ok ~= b.ok then return a.ok end
